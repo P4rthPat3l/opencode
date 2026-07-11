@@ -5,7 +5,7 @@ export type VoiceRecorder = {
 
 const MAX_RECORDING_SECONDS = 60 * 5
 
-export async function startVoiceRecorder() {
+export async function startVoiceRecorder(options?: { onLevel?: (level: number) => void }) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   const context = new AudioContext({ sampleRate: 16_000 })
   const source = context.createMediaStreamSource(stream)
@@ -25,8 +25,13 @@ export async function startVoiceRecorder() {
   }
 
   processor.onaudioprocess = (event) => {
-    if (sampleCount >= maxSamples) return
     const input = event.inputBuffer.getChannelData(0)
+    if (options?.onLevel) {
+      let sum = 0
+      for (let i = 0; i < input.length; i++) sum += input[i]! * input[i]!
+      options.onLevel(Math.sqrt(sum / input.length))
+    }
+    if (sampleCount >= maxSamples) return
     const chunk = new Float32Array(input.subarray(0, Math.min(input.length, maxSamples - sampleCount)))
     chunks.push(chunk)
     sampleCount += chunk.length
