@@ -1,0 +1,16 @@
+[package]
+name = "opencode-speech"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+hound = "3.5.1"
+miniaudio = { package = "om-fork-miniaudio", version = "0.12.2", default-features = false, features = ["ma-log-level-error", "ma-no-flac", "ma-no-mp3"] }
+whisper-rs = "0.16.0"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

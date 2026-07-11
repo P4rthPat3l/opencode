@@ -11,11 +11,19 @@ import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
+import { Speech } from "@opencode-ai/core/speech"
 import { Effect, Option } from "effect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ConsoleSwitchPayload, SessionListQuery, ToolListQuery, WorktreeApiError } from "../groups/experimental"
+import {
+  ConsoleSwitchPayload,
+  SessionListQuery,
+  ToolListQuery,
+  TranscribeApiError,
+  TranscribePayload,
+  WorktreeApiError,
+} from "../groups/experimental"
 
 function mapWorktreeError<A, R>(self: Effect.Effect<A, Worktree.Error, R>) {
   return self.pipe(
@@ -108,6 +116,22 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       return yield* registry.ids()
     })
 
+    const transcribe = Effect.fn("ExperimentalHttpApi.transcribe")(function* (ctx: {
+      payload: typeof TranscribePayload.Type
+    }) {
+      if (!ctx.payload.audio.trim()) return yield* new TranscribeApiError({ message: "No audio was recorded" })
+      const text = yield* Effect.tryPromise({
+        try: () =>
+          Speech.transcribeAudioBytes({
+            bytes: Uint8Array.from(Buffer.from(ctx.payload.audio, "base64")),
+            language: ctx.payload.language,
+          }),
+        catch: (error) =>
+          new TranscribeApiError({ message: error instanceof Error ? error.message : "Voice transcription failed" }),
+      })
+      return { text }
+    })
+
     const worktree = Effect.fn("ExperimentalHttpApi.worktree")(function* () {
       const ctx = yield* InstanceState.context
       return yield* project.sandboxes(ctx.project.id)
@@ -182,6 +206,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("consoleSwitch", switchConsole)
       .handle("tool", tool)
       .handle("toolIDs", toolIDs)
+      .handle("transcribe", transcribe)
       .handle("worktree", worktree)
       .handle("worktreeCreate", worktreeCreate)
       .handle("worktreeRemove", worktreeRemove)

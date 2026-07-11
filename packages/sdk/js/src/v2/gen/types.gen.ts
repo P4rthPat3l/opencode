@@ -2145,6 +2145,19 @@ export type ToolList = Array<ToolListItem>
 
 export type ToolIds = Array<string>
 
+export type ExperimentalTranscribePayload = {
+  audio: string
+  language?: string
+}
+
+export type ExperimentalTranscribeResponse = {
+  text: string
+}
+
+export type TranscribeError = {
+  message: string
+}
+
 export type WorktreeError = {
   name:
     | "WorktreeNotGitError"
@@ -7674,6 +7687,34 @@ export type ToolIdsResponses = {
 }
 
 export type ToolIdsResponse = ToolIdsResponses[keyof ToolIdsResponses]
+
+export type ExperimentalTranscribeData = {
+  body?: ExperimentalTranscribePayload
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/transcribe"
+}
+
+export type ExperimentalTranscribeErrors = {
+  /**
+   * TranscribeError | InvalidRequestError
+   */
+  400: TranscribeError | InvalidRequestError
+}
+
+export type ExperimentalTranscribeError = ExperimentalTranscribeErrors[keyof ExperimentalTranscribeErrors]
+
+export type ExperimentalTranscribeResponses = {
+  /**
+   * Transcribed text
+   */
+  200: ExperimentalTranscribeResponse
+}
+
+export type ExperimentalTranscribeResponse2 = ExperimentalTranscribeResponses[keyof ExperimentalTranscribeResponses]
 
 export type WorktreeRemoveData = {
   body?: WorktreeRemoveInput

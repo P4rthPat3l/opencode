@@ -68,8 +68,115 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       repo: ${{ steps.version.outputs.repo }}
 
-  build-cli:
+  build-speech:
     needs: version
+    if: github.repository == 'anomalyco/opencode'
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: blacksmith-4vcpu-ubuntu-2404
+            target: x86_64-unknown-linux-gnu
+            output: linux-x64
+          - host: blacksmith-4vcpu-ubuntu-2404-arm
+            target: aarch64-unknown-linux-gnu
+            output: linux-arm64
+          - host: blacksmith-4vcpu-ubuntu-2404
+            target: x86_64-unknown-linux-musl
+            output: linux-x64-musl
+            musl: true
+          - host: blacksmith-4vcpu-ubuntu-2404-arm
+            target: aarch64-unknown-linux-musl
+            output: linux-arm64-musl
+            musl: true
+          - host: macos-26-intel
+            target: x86_64-apple-darwin
+            output: darwin-x64
+          - host: macos-26
+            target: aarch64-apple-darwin
+            output: darwin-arm64
+          - host: windows-2025
+            target: x86_64-pc-windows-msvc
+            output: windows-x64
+          - host: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            output: windows-arm64
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+        if: runner.os == 'macOS'
+        with:
+          keychain: build
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build python3-pip
+
+      - name: Install musl cross toolchain
+        if: matrix.settings.musl
+        shell: bash
+        run: |
+          python3 -m pip install --user --break-system-packages ziglang==0.15.2
+          cargo install cargo-zigbuild --locked --version 0.20.1
+          ln -sf "$(command -v python-zig)" "$HOME/.cargo/bin/zig"
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.settings.target }}
+
+      - name: Build speech sidecar
+        shell: bash
+        working-directory: packages/speech
+        env:
+          CXX_x86_64_unknown_linux_musl: ${{ github.workspace }}/packages/speech/script/zig-cxx-x64
+          CXX_aarch64_unknown_linux_musl: ${{ github.workspace }}/packages/speech/script/zig-cxx-arm64
+          CFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          CXXFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          GGML_CPU_ARM_ARCH: ${{ startsWith(matrix.settings.target, 'aarch64') && 'armv8-a' || '' }}
+          GGML_NATIVE: "OFF"
+          GGML_OPENMP: "OFF"
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: |
+          if [[ "${{ matrix.settings.musl }}" == "true" ]]; then
+            cargo zigbuild --release --locked --target ${{ matrix.settings.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.settings.target }}
+          fi
+
+      - name: Sign macOS speech sidecar
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          identity=$(security find-identity -v -p codesigning | awk -F '"' '/Developer ID Application/ {print $2; exit}')
+          test -n "$identity"
+          codesign --force --options runtime --timestamp --sign "$identity" "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech"
+          codesign --verify --strict --verbose=2 "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech"
+
+      - name: Stage speech sidecar
+        shell: bash
+        run: |
+          mkdir -p "packages/speech/dist/${{ matrix.settings.output }}"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech.exe" "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech.exe"
+          else
+            cp "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech" "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech"
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: opencode-speech-${{ matrix.settings.output }}
+          path: packages/speech/dist
+
+  build-cli:
+    needs:
+      - version
+      - build-speech
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: github.repository == 'anomalyco/opencode'
     steps:
@@ -78,6 +185,12 @@ jobs:
           fetch-tags: true
 
       - uses: ./.github/actions/setup-bun
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: opencode-speech-*
+          path: packages/opencode/speech-dist
+          merge-multiple: true
 
       - name: Setup git committer
         id: committer
@@ -96,6 +209,7 @@ jobs:
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           GH_REPO: ${{ needs.version.outputs.repo }}
           GH_TOKEN: ${{ steps.committer.outputs.token }}
+          OPENCODE_SPEECH_DIR: ${{ github.workspace }}/packages/opencode/speech-dist
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -159,8 +273,11 @@ jobs:
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files: |
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe
+            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode-speech.exe
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe
+            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode-speech.exe
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe
+            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode-speech.exe
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
@@ -177,8 +294,11 @@ jobs:
         run: |
           $files = @(
             "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe",
+            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode-speech.exe",
             "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe"
+            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode-speech.exe",
+            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe",
+            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode-speech.exe"
           )
 
           foreach ($file in $files) {
