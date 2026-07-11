@@ -21,6 +21,40 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  speech:
+    name: speech (${{ matrix.settings.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - name: linux
+            host: blacksmith-4vcpu-ubuntu-2404
+          - name: macos
+            host: macos-26
+          - name: windows
+            host: blacksmith-4vcpu-windows-2025
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build
+
+      - name: Test speech sidecar
+        working-directory: packages/speech
+        env:
+          CFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          CXXFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          GGML_NATIVE: "OFF"
+          GGML_OPENMP: "OFF"
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: cargo test --locked
+
   unit:
     name: unit (${{ matrix.settings.name }})
     strategy:

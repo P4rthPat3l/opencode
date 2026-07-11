@@ -532,6 +532,10 @@ const scenarios: Scenario[] = [
     }))
     .json(200, array, "status"),
   http.protected.get("/experimental/tool/ids", "tool.ids").json(200, array),
+  http.protected
+    .post("/experimental/transcribe", "experimental.transcribe")
+    .at((ctx) => ({ path: "/experimental/transcribe", headers: ctx.headers(), body: { audio: "" } }))
+    .status(400),
   http.protected.get("/experimental/worktree", "worktree.list").json(200, array),
   http.protected
     .post("/experimental/worktree", "worktree.create")

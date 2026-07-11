@@ -18,6 +18,18 @@ function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
   }
 }
 
+test("voice press and release bindings can be overridden", () => {
+  const keybinds = TuiKeybind.parse({
+    prompt_voice_start: { key: "f8", event: "press" },
+    prompt_voice_stop: { key: "f8", event: "release" },
+  })
+
+  expect(keybinds.prompt_voice_start).toEqual({ key: "f8", event: "press" })
+  expect(keybinds.prompt_voice_stop).toEqual({ key: "f8", event: "release" })
+  expect(TuiKeybind.CommandMap.prompt_voice_start).toBe("prompt.voice.start")
+  expect(TuiKeybind.CommandMap.prompt_voice_stop).toBe("prompt.voice.stop")
+})
+
 test("legacy page key aliases compile as page keys", async () => {
   const sequences: Record<string, string[][]> = {}
 

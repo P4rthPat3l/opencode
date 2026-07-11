@@ -29,6 +29,22 @@ const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
+export const TranscribePayload = Schema.Struct({
+  audio: Schema.String.check(Schema.isMaxLength(40_000_000)),
+  language: Schema.optional(Schema.String.check(Schema.isMaxLength(16))),
+}).annotate({ identifier: "ExperimentalTranscribePayload" })
+
+const TranscribeResponse = Schema.Struct({
+  text: Schema.String,
+}).annotate({ identifier: "ExperimentalTranscribeResponse" })
+
+export class TranscribeApiError extends Schema.ErrorClass<TranscribeApiError>("TranscribeError")(
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {}
+
 const ConsoleOrgOption = Schema.Struct({
   accountID: Schema.String,
   accountEmail: Schema.String,
@@ -99,6 +115,7 @@ export const ExperimentalPaths = {
   session: "/experimental/session",
   sessionBackground: "/experimental/session/:sessionID/background",
   resource: "/experimental/resource",
+  transcribe: "/experimental/transcribe",
 } as const
 
 export const ExperimentalApi = HttpApi.make("experimental")
@@ -171,6 +188,18 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "List tool IDs",
             description:
               "Get a list of all available tool IDs, including both built-in tools and dynamically registered tools.",
+          }),
+        ),
+        HttpApiEndpoint.post("transcribe", ExperimentalPaths.transcribe, {
+          query: WorkspaceRoutingQuery,
+          payload: TranscribePayload,
+          success: described(TranscribeResponse, "Transcribed text"),
+          error: TranscribeApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.transcribe",
+            summary: "Transcribe local voice audio",
+            description: "Transcribe WAV audio locally using whisper.cpp and the quantized base model.",
           }),
         ),
         HttpApiEndpoint.get("worktree", ExperimentalPaths.worktree, {

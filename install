@@ -342,6 +342,7 @@ download_and_install() {
 
     mv "$tmp_dir/opencode" "$INSTALL_DIR"
     chmod 755 "${INSTALL_DIR}/opencode"
+    install_speech_sidecar "$tmp_dir" mv
     rm -rf "$tmp_dir"
 }
 
@@ -349,6 +350,23 @@ install_from_binary() {
     print_message info "\n${MUTED}Installing ${NC}opencode ${MUTED}from: ${NC}$binary_path"
     cp "$binary_path" "${INSTALL_DIR}/opencode"
     chmod 755 "${INSTALL_DIR}/opencode"
+    install_speech_sidecar "$(dirname "$binary_path")" cp
+}
+
+# Install the optional local voice sidecar (and its notices) when it sits
+# alongside the opencode binary. Absent for builds without voice support.
+install_speech_sidecar() {
+    local source_dir=$1
+    local action=$2
+    local extra
+    for extra in opencode-speech opencode-speech.exe OPENCODE_SPEECH_NOTICES.md; do
+        [ -f "$source_dir/$extra" ] || continue
+        "$action" "$source_dir/$extra" "${INSTALL_DIR}/$extra"
+        case "$extra" in
+            *.md) ;;
+            *) chmod 755 "${INSTALL_DIR}/$extra" ;;
+        esac
+    done
 }
 
 if [ -n "$binary_path" ]; then

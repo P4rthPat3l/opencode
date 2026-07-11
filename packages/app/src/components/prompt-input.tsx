@@ -6,6 +6,7 @@ import {
   Component,
   Show,
   onCleanup,
+  onMount,
   createMemo,
   createSignal,
   createResource,
@@ -72,6 +73,7 @@ import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createPromptInputTransientState } from "./prompt-input/transient-state"
+import { blobToBase64, startVoiceRecorder, type VoiceRecorder } from "./prompt-input/voice"
 import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
@@ -122,6 +124,22 @@ export function createPromptInputHistory(): PromptInputHistory {
   const [normal, setNormal] = createStore<PromptHistoryState>({ entries: [] })
   const [shell, setShell] = createStore<PromptHistoryState>({ entries: [] })
   return createPromptInputHistoryStore(normal, setNormal, shell, setShell)
+}
+
+function voiceStartErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === "NotAllowedError") {
+    return "Microphone permission is blocked. Allow mic access to dictate locally."
+  }
+  if (error instanceof DOMException && error.name === "NotFoundError") return "No microphone was found"
+  return error instanceof Error ? error.message : "Microphone access failed"
+}
+
+function voiceTranscribeErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string")
+    return error.message
+  if (error && typeof error === "object" && "data" in error) return voiceTranscribeErrorMessage(error.data)
+  return "Voice transcription failed"
 }
 
 type PromptHistoryState = { entries: PromptHistoryStoredEntry[] }
@@ -350,6 +368,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     () => prompt.capture(),
     Math.floor(Math.random() * EXAMPLES.length),
   )
+  const [voice, setVoice] = createStore({
+    starting: false,
+    recording: false,
+    transcribing: false,
+    held: false,
+    stopRequested: false,
+  })
+  let voiceRecorder: VoiceRecorder | undefined
+  let voiceDisposed = false
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
   const motion = (value: number) => ({
     opacity: value,
@@ -373,6 +400,30 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return text.trim().length === 0 && imageAttachments().length === 0 && commentCount() === 0
   })
   const stopping = createMemo(() => working() && blank())
+  const voiceDisabled = createMemo(
+    () =>
+      store.mode !== "normal" ||
+      working() ||
+      voice.starting ||
+      voice.transcribing ||
+      typeof navigator.mediaDevices?.getUserMedia !== "function",
+  )
+  const voiceButtonLabel = createMemo(() => {
+    if (voice.recording) return "Stop recording and transcribe locally"
+    if (voice.starting) return "Opening microphone…"
+    if (voice.transcribing) return "Transcribing locally…"
+    return "Start local dictation"
+  })
+  const voiceTip = createMemo(() => {
+    if (voice.recording) return "Release Ctrl+Space or click Stop to transcribe"
+    if (voice.starting) return "Opening microphone…"
+    if (voice.transcribing) return "Preparing local transcription. First run may download the speech model…"
+    if (store.mode === "shell") return "Dictation is available for prompts, not shell commands"
+    if (working()) return "Dictation is available when opencode is idle"
+    if (typeof navigator.mediaDevices?.getUserMedia !== "function")
+      return "Voice dictation is not supported in this browser"
+    return "Hold Ctrl+Space to dictate locally, or click to record"
+  })
   const tip = () => {
     if (stopping()) {
       return (
@@ -655,15 +706,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const referenceList = createMemo(() =>
     sync()
       .data.reference.filter((reference) => !reference.hidden)
-      .map(
-        (reference): AtOption => ({
-          type: "reference",
-          name: reference.name,
-          path: reference.path,
-          display: reference.name,
-          description: reference.description ?? referenceDescription(reference),
-        }),
-      ),
+      .map((reference): AtOption => ({
+        type: "reference",
+        name: reference.name,
+        path: reference.path,
+        display: reference.name,
+        description: reference.description ?? referenceDescription(reference),
+      })),
   )
 
   const agentList = createMemo(() =>
@@ -673,17 +722,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   )
 
   const mcpResourceList = createMemo(() =>
-    Object.values(sync().data.mcp_resource).map(
-      (resource): AtOption => ({
-        type: "resource",
-        name: resource.name,
-        uri: resource.uri,
-        client: resource.client,
-        display: resource.name,
-        description: resource.description,
-        mime: resource.mimeType,
-      }),
-    ),
+    Object.values(sync().data.mcp_resource).map((resource): AtOption => ({
+      type: "resource",
+      name: resource.name,
+      uri: resource.uri,
+      client: resource.client,
+      display: resource.name,
+      description: resource.description,
+      mime: resource.mimeType,
+    })),
   )
 
   const handleAtSelect = (option: AtOption | undefined) => {
@@ -1188,6 +1235,72 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return true
   }
 
+  const startVoice = async (held = false) => {
+    if (voiceDisabled() || voice.recording) return
+    setVoice({ starting: true, held, stopRequested: false })
+    try {
+      const recorder = await startVoiceRecorder()
+      if (voiceDisposed) {
+        await recorder.cancel()
+        return
+      }
+      voiceRecorder = recorder
+      setVoice({ starting: false, recording: true })
+      if (voice.stopRequested) void stopVoice()
+    } catch (error) {
+      setVoice({ starting: false, held: false, stopRequested: false })
+      showToast({ variant: "error", title: voiceStartErrorMessage(error) })
+    }
+  }
+
+  const stopVoice = async () => {
+    if (voice.starting) {
+      setVoice({ held: false, stopRequested: true })
+      return
+    }
+    const recorder = voiceRecorder
+    if (!recorder || !voice.recording) return
+    voiceRecorder = undefined
+    setVoice({ recording: false, held: false, transcribing: true, stopRequested: false })
+    try {
+      const audio = await blobToBase64(await recorder.stop())
+      showToast({ title: "Preparing local transcription", description: "First run may download the speech model." })
+      const result = await sdk().client.experimental.transcribe({ experimentalTranscribePayload: { audio } })
+      if (result.error) throw new Error(voiceTranscribeErrorMessage(result.error))
+      const text = result.data?.text.trim() ?? ""
+      if (text) addPart({ type: "text", content: text, start: 0, end: 0 })
+      if (!text) showToast({ title: "No speech detected" })
+    } catch (error) {
+      showToast({ variant: "error", title: error instanceof Error ? error.message : "Voice transcription failed" })
+    } finally {
+      setVoice("transcribing", false)
+      restoreFocus()
+    }
+  }
+
+  const toggleVoice = () => {
+    if (voice.recording) {
+      void stopVoice()
+      return
+    }
+    void startVoice()
+  }
+
+  onMount(() => {
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!voice.held) return
+      if (event.code !== "Space") return
+      event.preventDefault()
+      void stopVoice()
+    }
+    document.addEventListener("keyup", onKeyUp)
+    onCleanup(() => {
+      voiceDisposed = true
+      document.removeEventListener("keyup", onKeyUp)
+      void voiceRecorder?.cancel()
+    })
+  })
+
   const openCommands = () => {
     const populated = prompt.dirty() || commentCount() > 0
     requestAnimationFrame(() => {
@@ -1339,6 +1452,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.ctrlKey && event.code === "Space" && !event.repeat) {
+      event.preventDefault()
+      void startVoice(true)
+      return
+    }
+
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
       event.preventDefault()
       if (store.mode !== "normal") return
@@ -1741,6 +1860,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <ComposerAgentControl state={agentControlState()} />
                   </Show>
                   {props.toolbar}
+                  <TooltipV2 placement="top" value={voiceTip()}>
+                    <IconButtonV2
+                      data-action="prompt-voice"
+                      type="button"
+                      icon={<IconV2 name={voice.recording ? "stop" : "microphone"} />}
+                      variant={voice.recording ? "neutral" : "ghost-muted"}
+                      size="large"
+                      style={buttons()}
+                      disabled={voiceDisabled() && !voice.recording}
+                      tabIndex={store.mode === "normal" ? undefined : -1}
+                      aria-label={voiceButtonLabel()}
+                      onClick={toggleVoice}
+                    />
+                  </TooltipV2>
                   <ComposerModelControl state={modelControlState()} />
                   <Show when={!providersLoading() && store.mode !== "shell" && showVariantControl()}>
                     <div
@@ -1941,6 +2074,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 />
 
                 <div class="flex items-center gap-1 pointer-events-auto">
+                  <Tooltip placement="top" value={voiceTip()}>
+                    <Button
+                      data-action="prompt-voice"
+                      type="button"
+                      variant="ghost"
+                      class="size-8 p-0"
+                      style={buttons()}
+                      onClick={toggleVoice}
+                      disabled={voiceDisabled() && !voice.recording}
+                      tabIndex={store.mode === "normal" ? undefined : -1}
+                      aria-label={voiceButtonLabel()}
+                    >
+                      <Icon name={voice.recording ? "stop" : "microphone"} class="size-4.5" />
+                    </Button>
+                  </Tooltip>
                   <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                     <IconButton
                       data-action="prompt-submit"

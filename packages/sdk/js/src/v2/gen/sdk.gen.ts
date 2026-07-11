@@ -46,6 +46,9 @@ import type {
   ExperimentalSessionBackgroundResponses,
   ExperimentalSessionListErrors,
   ExperimentalSessionListResponses,
+  ExperimentalTranscribeErrors,
+  ExperimentalTranscribePayload,
+  ExperimentalTranscribeResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
   ExperimentalWorkspaceCreateErrors,
@@ -1241,6 +1244,47 @@ export class Workspace extends HeyApiClient {
 }
 
 export class Experimental extends HeyApiClient {
+  /**
+   * Transcribe local voice audio
+   *
+   * Transcribe WAV audio locally using whisper.cpp and the tiny.en model.
+   */
+  public transcribe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      experimentalTranscribePayload?: ExperimentalTranscribePayload
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "experimentalTranscribePayload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTranscribeResponses,
+      ExperimentalTranscribeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/transcribe",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _controlPlane?: ControlPlane
   get controlPlane(): ControlPlane {
     return (this._controlPlane ??= new ControlPlane({ client: this.client }))

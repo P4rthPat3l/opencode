@@ -56,6 +56,7 @@ import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+import { startVoiceRecording, type VoiceRecording } from "../../voice"
 
 registerOpencodeSpinner()
 
@@ -164,6 +165,7 @@ export function Prompt(props: PromptProps) {
   const keymap = useOpencodeKeymap()
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
+  const voiceShortcut = useCommandShortcut("prompt.voice.start")
   const renderer = useRenderer()
   const exit = useExit()
   const dimensions = useTerminalDimensions()
@@ -210,6 +212,18 @@ export function Prompt(props: PromptProps) {
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
   const hasRightContent = createMemo(() => Boolean(props.right))
+  const [voiceStarting, setVoiceStarting] = createSignal(false)
+  const [voiceRecording, setVoiceRecording] = createSignal(false)
+  const [voiceTranscribing, setVoiceTranscribing] = createSignal(false)
+  const [voiceMessage, setVoiceMessage] = createSignal<string>()
+  let voiceStopRequested = false
+  let voiceDisposed = false
+  const voiceStatus = createMemo(() => {
+    if (voiceStarting()) return "Opening microphone…"
+    if (voiceRecording()) return "Listening — release Ctrl+Space to transcribe"
+    if (voiceTranscribing()) return voiceMessage() ?? "Preparing local transcription…"
+  })
+  let voice: VoiceRecording | undefined
 
   function promptModelWarning() {
     toast.show({
@@ -219,6 +233,56 @@ export function Prompt(props: PromptProps) {
     })
     if (sync.data.provider.length === 0) {
       dialog.replace(() => <DialogProviderConnect />)
+    }
+  }
+
+  async function startVoice() {
+    if (voiceStarting() || voiceRecording() || voiceTranscribing()) return
+    voiceStopRequested = false
+    setVoiceStarting(true)
+    try {
+      const recording = await startVoiceRecording(setVoiceMessage)
+      if (voiceDisposed) {
+        await recording.cancel()
+        return
+      }
+      voice = recording
+      setVoiceRecording(true)
+      setVoiceMessage(undefined)
+      toast.show({ variant: "info", message: "Listening — release Ctrl+Space to transcribe", duration: 1200 })
+      if (voiceStopRequested) void stopVoice()
+    } catch (error) {
+      toast.show({ variant: "error", message: error instanceof Error ? error.message : "Voice recording failed" })
+    } finally {
+      setVoiceStarting(false)
+    }
+  }
+
+  async function stopVoice() {
+    if (voiceStarting()) {
+      voiceStopRequested = true
+      return
+    }
+    const current = voice
+    if (!current || !voiceRecording()) return
+    voice = undefined
+    setVoiceRecording(false)
+    setVoiceTranscribing(true)
+    setVoiceMessage("Preparing local transcription. First run may download the speech model…")
+    try {
+      const text = (await current.stop()).trim()
+      if (!text) {
+        toast.show({ variant: "warning", message: "No speech detected", duration: 1800 })
+        return
+      }
+      input.insertText(text)
+      input.getLayoutNode().markDirty()
+      renderer.requestRender()
+    } catch (error) {
+      toast.show({ variant: "error", message: error instanceof Error ? error.message : "Voice transcription failed" })
+    } finally {
+      setVoiceTranscribing(false)
+      setVoiceMessage(undefined)
     }
   }
 
@@ -622,6 +686,8 @@ export function Prompt(props: PromptProps) {
   })
 
   onCleanup(() => {
+    voiceDisposed = true
+    void voice?.cancel()
     if (store.prompt.input) {
       stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
     }
@@ -842,6 +908,28 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: inputTarget() !== undefined && store.mode === "shell",
       bindings: [{ key: "escape", desc: "Exit shell mode", group: "Prompt", cmd: () => setStore("mode", "normal") }],
+    }
+  })
+
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && store.mode === "normal",
+      commands: [
+        {
+          name: "prompt.voice.start",
+          title: "Start voice dictation",
+          category: "Prompt",
+          run: () => void startVoice(),
+        },
+        {
+          name: "prompt.voice.stop",
+          title: "Stop voice dictation",
+          category: "Prompt",
+          run: () => void stopVoice(),
+        },
+      ],
+      bindings: tuiConfig.keybinds.gather("prompt.voice", ["prompt.voice.start", "prompt.voice.stop"]),
     }
   })
 
@@ -1587,6 +1675,16 @@ export function Prompt(props: PromptProps) {
                 </text>
               </box>
             </Match>
+            <Match when={voiceStatus()}>
+              {(message) => (
+                <box paddingLeft={3} flexDirection="row" gap={1}>
+                  <Show when={voiceTranscribing()}>
+                    <Spinner color={theme.accent} />
+                  </Show>
+                  <text fg={voiceRecording() ? theme.primary : theme.accent}>{message()}</text>
+                </box>
+              )}
+            </Match>
             <Match when={workspace.notice()}>
               {(notice) => (
                 <box paddingLeft={3}>
@@ -1662,6 +1760,11 @@ export function Prompt(props: PromptProps) {
                       </text>
                     </Match>
                   </Switch>
+                  <Show when={!props.disabled}>
+                    <text fg={theme.text}>
+                      {voiceShortcut()} <span style={{ fg: theme.textMuted }}>dictate</span>
+                    </text>
+                  </Show>
                   <text fg={theme.text}>
                     {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
                   </text>

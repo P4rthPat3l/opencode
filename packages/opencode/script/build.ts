@@ -198,6 +198,25 @@ for (const item of targets) {
     },
   })
 
+  const speechExecutable = item.os === "win32" ? "opencode-speech.exe" : "opencode-speech"
+  const speechPlatform = item.os === "win32" ? "windows" : item.os
+  const speechTarget = [speechPlatform, item.arch, item.abi].filter(Boolean).join("-")
+  const speechSource = process.env.OPENCODE_SPEECH_DIR
+    ? path.join(process.env.OPENCODE_SPEECH_DIR, speechTarget, speechExecutable)
+    : singleFlag
+      ? path.resolve(dir, `../speech/target/release/${speechExecutable}`)
+      : undefined
+  if (speechSource && fs.existsSync(speechSource)) {
+    await Bun.write(`dist/${name}/bin/${speechExecutable}`, Bun.file(speechSource))
+    await Bun.write(
+      `dist/${name}/bin/OPENCODE_SPEECH_NOTICES.md`,
+      Bun.file(path.resolve(dir, "../speech/THIRD_PARTY_NOTICES.md")),
+    )
+    if (item.os !== "win32") await $`chmod 755 dist/${name}/bin/${speechExecutable}`
+  } else if (process.env.OPENCODE_SPEECH_DIR) {
+    throw new Error(`Missing speech sidecar for ${speechTarget}: ${speechSource}`)
+  }
+
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
     const binaryPath = `dist/${name}/bin/opencode`

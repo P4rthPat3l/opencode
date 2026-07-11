@@ -26,7 +26,9 @@ const platform = platformMap[os.platform()] ?? os.platform()
 const arch = archMap[os.arch()] ?? os.arch()
 const base = `opencode-${platform}-${arch}`
 const sourceBinary = platform === "windows" ? "opencode.exe" : "opencode"
+const sourceSpeech = platform === "windows" ? "opencode-speech.exe" : "opencode-speech"
 const targetBinary = path.join(__dirname, "bin", "opencode.exe")
+const targetSpeech = path.join(__dirname, "bin", sourceSpeech)
 
 function supportsAvx2() {
   if (arch !== "x64") return false
@@ -118,9 +120,7 @@ function packageNames() {
 
 function resolveBinary(name) {
   const packageJsonPath = require.resolve(`${name}/package.json`)
-  const binaryPath = path.join(path.dirname(packageJsonPath), "bin", sourceBinary)
-  if (!fs.existsSync(binaryPath)) throw new Error(`Binary not found at ${binaryPath}`)
-  return binaryPath
+  return path.join(path.dirname(packageJsonPath), "bin")
 }
 
 function installPackage(name) {
@@ -136,11 +136,16 @@ function installPackage(name) {
     )
     if (result.status !== 0) return
     const packageDir = path.join(temp, "node_modules", name)
-    copyBinary(path.join(packageDir, "bin", sourceBinary), targetBinary)
+    copyPackageBinaries(path.join(packageDir, "bin"))
     return true
   } finally {
     fs.rmSync(temp, { recursive: true, force: true })
   }
+}
+
+function copyPackageBinaries(directory) {
+  copyBinary(path.join(directory, sourceBinary), targetBinary)
+  copyBinary(path.join(directory, sourceSpeech), targetSpeech)
 }
 
 function copyBinary(source, target) {
@@ -161,13 +166,19 @@ function verifyBinary() {
     stdio: "ignore",
     windowsHide: true,
   })
-  return result.status === 0
+  if (result.status !== 0) return false
+  const speech = childProcess.spawnSync(targetSpeech, ["--version"], {
+    encoding: "utf8",
+    stdio: "ignore",
+    windowsHide: true,
+  })
+  return speech.status === 0
 }
 
 function main() {
   for (const name of packageNames()) {
     try {
-      copyBinary(resolveBinary(name), targetBinary)
+      copyPackageBinaries(resolveBinary(name))
       if (verifyBinary()) return
     } catch {
       if (installPackage(name) && verifyBinary()) return
