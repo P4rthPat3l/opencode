@@ -12,6 +12,7 @@ import {
   createResource,
   Switch,
   Match,
+  For,
   type JSX,
 } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
@@ -39,6 +40,7 @@ import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
 import { KeybindV2 } from "@opencode-ai/ui/v2/keybind-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
@@ -374,9 +376,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     transcribing: false,
     held: false,
     stopRequested: false,
+    level: 0,
   })
+  const [voiceElapsed, setVoiceElapsed] = createSignal(0)
+  let voiceTimer: ReturnType<typeof setInterval> | undefined
   let voiceRecorder: VoiceRecorder | undefined
   let voiceDisposed = false
+  const voiceActive = () => voice.starting || voice.recording || voice.transcribing
+  const voiceElapsedLabel = () => {
+    const total = Math.floor(voiceElapsed() / 1000)
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`
+  }
+  const stopVoiceTimer = () => {
+    if (voiceTimer !== undefined) clearInterval(voiceTimer)
+    voiceTimer = undefined
+  }
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
   const motion = (value: number) => ({
     opacity: value,
@@ -1237,18 +1251,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const startVoice = async (held = false) => {
     if (voiceDisabled() || voice.recording) return
-    setVoice({ starting: true, held, stopRequested: false })
+    setVoice({ starting: true, held, stopRequested: false, level: 0 })
     try {
-      const recorder = await startVoiceRecorder()
+      const recorder = await startVoiceRecorder({ onLevel: (level) => setVoice("level", level) })
       if (voiceDisposed) {
         await recorder.cancel()
         return
       }
       voiceRecorder = recorder
       setVoice({ starting: false, recording: true })
+      setVoiceElapsed(0)
+      const startedAt = Date.now()
+      stopVoiceTimer()
+      voiceTimer = setInterval(() => setVoiceElapsed(Date.now() - startedAt), 200)
       if (voice.stopRequested) void stopVoice()
     } catch (error) {
-      setVoice({ starting: false, held: false, stopRequested: false })
+      setVoice({ starting: false, held: false, stopRequested: false, level: 0 })
       showToast({ variant: "error", title: voiceStartErrorMessage(error) })
     }
   }
@@ -1261,10 +1279,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const recorder = voiceRecorder
     if (!recorder || !voice.recording) return
     voiceRecorder = undefined
-    setVoice({ recording: false, held: false, transcribing: true, stopRequested: false })
+    stopVoiceTimer()
+    setVoice({ recording: false, held: false, transcribing: true, stopRequested: false, level: 0 })
     try {
       const audio = await blobToBase64(await recorder.stop())
-      showToast({ title: "Preparing local transcription", description: "First run may download the speech model." })
       const result = await sdk().client.experimental.transcribe({ experimentalTranscribePayload: { audio } })
       if (result.error) throw new Error(voiceTranscribeErrorMessage(result.error))
       const text = result.data?.text.trim() ?? ""
@@ -1286,6 +1304,47 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     void startVoice()
   }
 
+  const voiceLevelBars = [0.45, 0.8, 1, 0.7, 0.4]
+  const voiceBarHeight = (weight: number) => `${Math.max(20, Math.min(100, voice.level * 600 * weight))}%`
+
+  const VoiceActive: Component = () => (
+    <Switch>
+      <Match when={voice.recording}>
+        <button
+          type="button"
+          data-action="prompt-voice-stop"
+          onClick={() => void stopVoice()}
+          aria-label="Stop recording and transcribe"
+          style={buttons()}
+          class="flex items-center gap-2 h-7 pl-2 pr-1.5 rounded-full text-red-500 bg-red-500/10 hover:bg-red-500/[0.16] border border-red-500/25 transition-colors"
+        >
+          <span class="relative flex size-2">
+            <span class="absolute inline-flex size-full rounded-full bg-red-500 opacity-60 animate-ping" />
+            <span class="relative inline-flex size-2 rounded-full bg-red-500" />
+          </span>
+          <span class="flex items-end gap-[2px] h-3.5" aria-hidden="true">
+            <For each={voiceLevelBars}>
+              {(weight) => (
+                <span
+                  class="w-[2px] rounded-full bg-current"
+                  style={{ height: voiceBarHeight(weight), transition: "height 90ms linear" }}
+                />
+              )}
+            </For>
+          </span>
+          <span class="text-xs tabular-nums font-medium">{voiceElapsedLabel()}</span>
+          <IconV2 name="stop" class="size-4" />
+        </button>
+      </Match>
+      <Match when={voice.starting || voice.transcribing}>
+        <div class="flex items-center gap-1.5 h-7 px-2 rounded-full text-neutral-500" style={buttons()}>
+          <LoaderV2 class="size-4" />
+          <span class="text-xs font-medium">{voice.starting ? "Opening mic…" : "Transcribing…"}</span>
+        </div>
+      </Match>
+    </Switch>
+  )
+
   onMount(() => {
     const onKeyUp = (event: KeyboardEvent) => {
       if (!voice.held) return
@@ -1296,6 +1355,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     document.addEventListener("keyup", onKeyUp)
     onCleanup(() => {
       voiceDisposed = true
+      stopVoiceTimer()
       document.removeEventListener("keyup", onKeyUp)
       void voiceRecorder?.cancel()
     })
@@ -1860,20 +1920,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <ComposerAgentControl state={agentControlState()} />
                   </Show>
                   {props.toolbar}
-                  <TooltipV2 placement="top" value={voiceTip()}>
-                    <IconButtonV2
-                      data-action="prompt-voice"
-                      type="button"
-                      icon={<IconV2 name={voice.recording ? "stop" : "microphone"} />}
-                      variant={voice.recording ? "neutral" : "ghost-muted"}
-                      size="large"
-                      style={buttons()}
-                      disabled={voiceDisabled() && !voice.recording}
-                      tabIndex={store.mode === "normal" ? undefined : -1}
-                      aria-label={voiceButtonLabel()}
-                      onClick={toggleVoice}
-                    />
-                  </TooltipV2>
+                  <Show
+                    when={voiceActive()}
+                    fallback={
+                      <TooltipV2 placement="top" value={voiceTip()}>
+                        <IconButtonV2
+                          data-action="prompt-voice"
+                          type="button"
+                          icon={<IconV2 name="microphone" />}
+                          variant="ghost-muted"
+                          size="large"
+                          style={buttons()}
+                          disabled={voiceDisabled()}
+                          tabIndex={store.mode === "normal" ? undefined : -1}
+                          aria-label={voiceButtonLabel()}
+                          onClick={toggleVoice}
+                        />
+                      </TooltipV2>
+                    }
+                  >
+                    <VoiceActive />
+                  </Show>
                   <ComposerModelControl state={modelControlState()} />
                   <Show when={!providersLoading() && store.mode !== "shell" && showVariantControl()}>
                     <div
@@ -2074,21 +2141,28 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 />
 
                 <div class="flex items-center gap-1 pointer-events-auto">
-                  <Tooltip placement="top" value={voiceTip()}>
-                    <Button
-                      data-action="prompt-voice"
-                      type="button"
-                      variant="ghost"
-                      class="size-8 p-0"
-                      style={buttons()}
-                      onClick={toggleVoice}
-                      disabled={voiceDisabled() && !voice.recording}
-                      tabIndex={store.mode === "normal" ? undefined : -1}
-                      aria-label={voiceButtonLabel()}
-                    >
-                      <Icon name={voice.recording ? "stop" : "microphone"} class="size-4.5" />
-                    </Button>
-                  </Tooltip>
+                  <Show
+                    when={voiceActive()}
+                    fallback={
+                      <Tooltip placement="top" value={voiceTip()}>
+                        <Button
+                          data-action="prompt-voice"
+                          type="button"
+                          variant="ghost"
+                          class="size-8 p-0"
+                          style={buttons()}
+                          onClick={toggleVoice}
+                          disabled={voiceDisabled()}
+                          tabIndex={store.mode === "normal" ? undefined : -1}
+                          aria-label={voiceButtonLabel()}
+                        >
+                          <Icon name="microphone" class="size-4.5" />
+                        </Button>
+                      </Tooltip>
+                    }
+                  >
+                    <VoiceActive />
+                  </Show>
                   <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                     <IconButton
                       data-action="prompt-submit"
