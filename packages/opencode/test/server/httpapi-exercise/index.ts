@@ -631,6 +631,76 @@ const scenarios: Scenario[] = [
       check(body === true, "log route should return true")
     }),
   http.protected
+    .get("/auth", "auth.list")
+    .global()
+    .seeded(() =>
+      Effect.promise(() =>
+        Bun.write(
+          path.join(exerciseDataDirectory, "auth.json"),
+          JSON.stringify({ test: { type: "api", key: "list-me" } }),
+        ),
+      ),
+    )
+    .json(200, (body) => {
+      array(body)
+      check(body.length === 1 && isRecord(body[0]) && body[0].active === true, "auth list should return active account")
+    }),
+  http.protected
+    .post("/auth/{providerID}", "auth.add")
+    .global()
+    .at(() => ({
+      path: route("/auth/{providerID}", { providerID: "test" }),
+      body: { auth: { type: "api", key: "added-key" }, label: "Work" },
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(
+        body.providerID === "test" && body.label === "Work" && body.active === true,
+        "auth add should activate account",
+      )
+    }),
+  http.protected
+    .put("/auth/{providerID}/{accountID}/active", "auth.select")
+    .global()
+    .seeded(() =>
+      Effect.promise(() =>
+        Bun.write(
+          path.join(exerciseDataDirectory, "auth.json"),
+          JSON.stringify({
+            test: {
+              type: "accounts",
+              active: "first",
+              accounts: [
+                { id: "first", label: "First", auth: { type: "api", key: "first-key" } },
+                { id: "second", label: "Second", auth: { type: "api", key: "second-key" } },
+              ],
+            },
+          }),
+        ),
+      ),
+    )
+    .at(() => ({ path: route("/auth/{providerID}/{accountID}/active", { providerID: "test", accountID: "second" }) }))
+    .json(200, (body) => check(body === true, "auth select should return true")),
+  http.protected
+    .delete("/auth/{providerID}/{accountID}", "auth.removeAccount")
+    .global()
+    .seeded(() =>
+      Effect.promise(() =>
+        Bun.write(
+          path.join(exerciseDataDirectory, "auth.json"),
+          JSON.stringify({
+            test: {
+              type: "accounts",
+              active: "remove",
+              accounts: [{ id: "remove", label: "Remove", auth: { type: "api", key: "remove-key" } }],
+            },
+          }),
+        ),
+      ),
+    )
+    .at(() => ({ path: route("/auth/{providerID}/{accountID}", { providerID: "test", accountID: "remove" }) }))
+    .json(200, (body) => check(body === true, "auth account remove should return true")),
+  http.protected
     .put("/auth/{providerID}", "auth.set")
     .global()
     .at(() => ({ path: route("/auth/{providerID}", { providerID: "test" }), body: { type: "api", key: "test-key" } }))
@@ -639,7 +709,14 @@ const scenarios: Scenario[] = [
         check(body === true, "auth set should return true")
         const auth = yield* Effect.promise(() => Bun.file(path.join(exerciseDataDirectory, "auth.json")).json())
         object(auth)
-        check(isRecord(auth.test) && auth.test.key === "test-key", "auth set should write isolated auth file")
+        check(
+          isRecord(auth.test) &&
+            Array.isArray(auth.test.accounts) &&
+            isRecord(auth.test.accounts[0]) &&
+            isRecord(auth.test.accounts[0].auth) &&
+            auth.test.accounts[0].auth.key === "test-key",
+          "auth set should write isolated auth file",
+        )
       }),
     ),
   http.protected

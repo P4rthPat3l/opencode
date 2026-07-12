@@ -72,4 +72,56 @@ describe("Auth", () => {
       expect(after["anthropic"]).toBeUndefined()
     }),
   )
+
+  it.instance("stores multiple accounts and selects the active account", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      const first = yield* auth.add("multi-account-test", { type: "api", key: "sk-first" }, "Work")
+      const second = yield* auth.add("multi-account-test", { type: "api", key: "sk-second" }, "Personal")
+
+      expect((yield* auth.get("multi-account-test"))?.type).toBe("api")
+      expect((yield* auth.accounts("multi-account-test")).map((account) => [account.label, account.active])).toEqual([
+        ["Work", false],
+        ["Personal", true],
+      ])
+
+      yield* auth.select("multi-account-test", first.id)
+      const active = yield* auth.get("multi-account-test")
+      expect(active?.type).toBe("api")
+      if (active?.type === "api") expect(active.key).toBe("sk-first")
+      expect((yield* auth.accounts("multi-account-test")).find((account) => account.id === second.id)?.active).toBe(
+        false,
+      )
+      yield* auth.remove("multi-account-test")
+    }),
+  )
+
+  it.instance("removing the active account selects a remaining account", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      const first = yield* auth.add("remove-account-test", { type: "api", key: "sk-first" })
+      const second = yield* auth.add("remove-account-test", { type: "api", key: "sk-second" })
+
+      yield* auth.removeAccount("remove-account-test", second.id)
+      expect(yield* auth.accounts("remove-account-test")).toEqual([
+        expect.objectContaining({ id: first.id, active: true }),
+      ])
+      const active = yield* auth.get("remove-account-test")
+      if (active?.type === "api") expect(active.key).toBe("sk-first")
+      yield* auth.remove("remove-account-test")
+    }),
+  )
+
+  it.instance("set refreshes the active account without adding another", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      yield* auth.add("refresh-account-test", { type: "oauth", refresh: "old", access: "old", expires: 1 }, "Work")
+      yield* auth.set("refresh-account-test", { type: "oauth", refresh: "new", access: "new", expires: 2 })
+
+      expect(yield* auth.accounts("refresh-account-test")).toHaveLength(1)
+      const active = yield* auth.get("refresh-account-test")
+      if (active?.type === "oauth") expect(active.access).toBe("new")
+      yield* auth.remove("refresh-account-test")
+    }),
+  )
 })

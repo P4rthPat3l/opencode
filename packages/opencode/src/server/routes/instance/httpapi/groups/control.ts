@@ -29,12 +29,60 @@ export const LogInput = Schema.Struct({
 })
 
 export const ControlPaths = {
+  authList: "/auth",
   auth: "/auth/:providerID",
+  authAccount: "/auth/:providerID/:accountID",
+  authActive: "/auth/:providerID/:accountID/active",
   log: "/log",
 } as const
 
 export const ControlApi = HttpApi.make("control").add(
   HttpApiGroup.make("control")
+    .add(
+      HttpApiEndpoint.get("authList", ControlPaths.authList, {
+        success: Schema.Array(Auth.Account),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.list",
+          summary: "List auth accounts",
+          description: "List stored provider accounts without exposing credentials",
+        }),
+      ),
+      HttpApiEndpoint.post("authAdd", ControlPaths.auth, {
+        params: AuthParams,
+        payload: Schema.Struct({ auth: Auth.Info, label: Schema.optional(Schema.String) }),
+        success: Auth.Account,
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.add",
+          summary: "Add auth account",
+          description: "Store and activate another account for a provider",
+        }),
+      ),
+      HttpApiEndpoint.put("authSelect", ControlPaths.authActive, {
+        params: Schema.Struct({ providerID: ProviderV2.ID, accountID: Schema.String }),
+        success: described(Schema.Boolean, "Successfully selected authentication account"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.select",
+          summary: "Select auth account",
+          description: "Set the active account for a provider",
+        }),
+      ),
+      HttpApiEndpoint.delete("authRemoveAccount", ControlPaths.authAccount, {
+        params: Schema.Struct({ providerID: ProviderV2.ID, accountID: Schema.String }),
+        success: described(Schema.Boolean, "Successfully removed authentication account"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.removeAccount",
+          summary: "Remove auth account",
+          description: "Remove one stored account for a provider",
+        }),
+      ),
+    )
     .add(
       HttpApiEndpoint.put("authSet", ControlPaths.auth, {
         params: AuthParams,

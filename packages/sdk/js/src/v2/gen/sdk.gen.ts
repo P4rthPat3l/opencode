@@ -11,8 +11,16 @@ import type {
   AppSkillsErrors,
   AppSkillsResponses,
   Auth as Auth3,
+  AuthAddErrors,
+  AuthAddResponses,
+  AuthListErrors,
+  AuthListResponses,
+  AuthRemoveAccountErrors,
+  AuthRemoveAccountResponses,
   AuthRemoveErrors,
   AuthRemoveResponses,
+  AuthSelectErrors,
+  AuthSelectResponses,
   AuthSetErrors,
   AuthSetResponses,
   CommandListErrors,
@@ -456,6 +464,18 @@ class HeyApiRegistry<T> {
 
 export class Auth extends HeyApiClient {
   /**
+   * List auth accounts
+   *
+   * List stored provider accounts without exposing credentials
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AuthListResponses, AuthListErrors, ThrowOnError>({
+      url: "/auth",
+      ...options,
+    })
+  }
+
+  /**
    * Remove auth credentials
    *
    * Remove authentication credentials
@@ -471,6 +491,43 @@ export class Auth extends HeyApiClient {
       url: "/auth/{providerID}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Add auth account
+   *
+   * Store and activate another account for a provider
+   */
+  public add<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      auth?: Auth3
+      label?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "body", key: "auth" },
+            { in: "body", key: "label" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<AuthAddResponses, AuthAddErrors, ThrowOnError>({
+      url: "/auth/{providerID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -506,6 +563,66 @@ export class Auth extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Select auth account
+   *
+   * Set the active account for a provider
+   */
+  public select<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      accountID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "path", key: "accountID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<AuthSelectResponses, AuthSelectErrors, ThrowOnError>({
+      url: "/auth/{providerID}/{accountID}/active",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove auth account
+   *
+   * Remove one stored account for a provider
+   */
+  public removeAccount<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      accountID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "path", key: "accountID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<AuthRemoveAccountResponses, AuthRemoveAccountErrors, ThrowOnError>({
+      url: "/auth/{providerID}/{accountID}",
+      ...options,
+      ...params,
     })
   }
 }
@@ -1247,7 +1364,7 @@ export class Experimental extends HeyApiClient {
   /**
    * Transcribe local voice audio
    *
-   * Transcribe WAV audio locally using whisper.cpp and the tiny.en model.
+   * Transcribe WAV audio locally using whisper.cpp and the quantized base model.
    */
   public transcribe<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3257,6 +3374,7 @@ export class Oauth extends HeyApiClient {
       inputs?: {
         [key: string]: string
       }
+      label?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3270,6 +3388,7 @@ export class Oauth extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "method" },
             { in: "body", key: "inputs" },
+            { in: "body", key: "label" },
           ],
         },
       ],

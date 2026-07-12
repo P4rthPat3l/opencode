@@ -56,6 +56,7 @@ export class Authorization extends Schema.Class<Authorization>("ProviderAuthAuth
 export const AuthorizeInput = Schema.Struct({
   method: Schema.Finite.annotate({ description: "Auth method index" }),
   inputs: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({ description: "Prompt inputs" }),
+  label: Schema.optional(Schema.String).annotate({ description: "Account label" }),
 })
 export type AuthorizeInput = Schema.Schema.Type<typeof AuthorizeInput>
 
@@ -99,7 +100,7 @@ export interface Interface {
 
 interface State {
   hooks: Record<ProviderV2.ID, Hook>
-  pending: Map<ProviderV2.ID, AuthOAuthResult>
+  pending: Map<ProviderV2.ID, { result: AuthOAuthResult; label?: string }>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ProviderAuth") {}
@@ -122,7 +123,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
                 : Result.failVoid,
             ),
           ),
-          pending: new Map<ProviderV2.ID, AuthOAuthResult>(),
+          pending: new Map<ProviderV2.ID, { result: AuthOAuthResult; label?: string }>(),
         }
       }),
     )
@@ -177,7 +178,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
       }
 
       const result = yield* Effect.promise(() => method.authorize(input.inputs))
-      pending.set(input.providerID, result)
+      pending.set(input.providerID, { result, label: input.label })
       return {
         url: result.url,
         method: result.method,
@@ -191,32 +192,40 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
       const pending = (yield* InstanceState.get(state)).pending
       const match = pending.get(input.providerID)
       if (!match) return yield* new OauthMissing({ providerID: input.providerID })
-      if (match.method === "code" && !input.code) {
+      if (match.result.method === "code" && !input.code) {
         return yield* new OauthCodeMissing({ providerID: input.providerID })
       }
 
       const result = yield* Effect.promise(() =>
-        match.method === "code" ? match.callback(input.code!) : match.callback(),
+        match.result.method === "code" ? match.result.callback(input.code!) : match.result.callback(),
       )
       if (!result || result.type !== "success") return yield* new OauthCallbackFailed({})
 
       if ("key" in result) {
-        yield* auth.set(input.providerID, {
-          type: "api",
-          key: result.key,
-          ...(result.metadata ? { metadata: result.metadata } : {}),
-        })
+        yield* auth.add(
+          input.providerID,
+          {
+            type: "api",
+            key: result.key,
+            ...(result.metadata ? { metadata: result.metadata } : {}),
+          },
+          match.label,
+        )
       }
 
       if ("refresh" in result) {
         const { type: _, provider: __, refresh, access, expires, ...extra } = result
-        yield* auth.set(input.providerID, {
-          type: "oauth",
-          access,
-          refresh,
-          expires,
-          ...extra,
-        })
+        yield* auth.add(
+          input.providerID,
+          {
+            type: "oauth",
+            access,
+            refresh,
+            expires,
+            ...extra,
+          },
+          match.label,
+        )
       }
     })
 

@@ -394,7 +394,7 @@ function ApiMethod(props: ApiMethodProps) {
       }
       onConfirm={async (value) => {
         if (!value) return
-        await sdk.client.auth.set({
+        await sdk.client.auth.add({
           providerID: props.providerID,
           auth: {
             type: "api",

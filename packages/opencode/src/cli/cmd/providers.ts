@@ -25,9 +25,9 @@ const promptValue = <Value>(value: Option.Option<Value>) => {
   return Effect.succeed(value.value)
 }
 
-const put = Effect.fn("Cli.providers.put")(function* (key: string, info: Auth.Info) {
+const put = Effect.fn("Cli.providers.put")(function* (key: string, info: Auth.Info, label?: string) {
   const auth = yield* Auth.Service
-  yield* Effect.orDie(auth.set(key, info))
+  yield* Effect.orDie(auth.add(key, info, label))
 })
 
 const cliTry = <Value>(message: string, fn: () => PromiseLike<Value>) =>
@@ -40,6 +40,7 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   plugin: { auth: PluginAuth },
   provider: string,
   methodName?: string,
+  accountName?: string,
 ) {
   const index = yield* Effect.gen(function* () {
     if (!methodName) {
@@ -113,20 +114,28 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
         const saveProvider = result.provider ?? provider
         if ("refresh" in result) {
           const { type: _, provider: __, refresh, access, expires, ...extraFields } = result
-          yield* put(saveProvider, {
-            type: "oauth",
-            refresh,
-            access,
-            expires,
-            ...extraFields,
-          })
+          yield* put(
+            saveProvider,
+            {
+              type: "oauth",
+              refresh,
+              access,
+              expires,
+              ...extraFields,
+            },
+            accountName,
+          )
         }
         if ("key" in result) {
-          yield* put(saveProvider, {
-            type: "api",
-            key: result.key,
-            ...(result.metadata ? { metadata: result.metadata } : {}),
-          })
+          yield* put(
+            saveProvider,
+            {
+              type: "api",
+              key: result.key,
+              ...(result.metadata ? { metadata: result.metadata } : {}),
+            },
+            accountName,
+          )
         }
         yield* spinner.stop("Login successful")
       }
@@ -146,20 +155,28 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
         const saveProvider = result.provider ?? provider
         if ("refresh" in result) {
           const { type: _, provider: __, refresh, access, expires, ...extraFields } = result
-          yield* put(saveProvider, {
-            type: "oauth",
-            refresh,
-            access,
-            expires,
-            ...extraFields,
-          })
+          yield* put(
+            saveProvider,
+            {
+              type: "oauth",
+              refresh,
+              access,
+              expires,
+              ...extraFields,
+            },
+            accountName,
+          )
         }
         if ("key" in result) {
-          yield* put(saveProvider, {
-            type: "api",
-            key: result.key,
-            ...(result.metadata ? { metadata: result.metadata } : {}),
-          })
+          yield* put(
+            saveProvider,
+            {
+              type: "api",
+              key: result.key,
+              ...(result.metadata ? { metadata: result.metadata } : {}),
+            },
+            accountName,
+          )
         }
         yield* Prompt.log.success("Login successful")
       }
@@ -179,11 +196,15 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
     const metadata = Object.keys(inputs).length ? { metadata: inputs } : {}
     const authorizeApi = method.authorize
     if (!authorizeApi) {
-      yield* put(provider, {
-        type: "api",
-        key: apiKey,
-        ...metadata,
-      })
+      yield* put(
+        provider,
+        {
+          type: "api",
+          key: apiKey,
+          ...metadata,
+        },
+        accountName,
+      )
       yield* Prompt.outro("Done")
       return true
     }
@@ -195,11 +216,15 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
     if (result.type === "success") {
       const saveProvider = result.provider ?? provider
       const merged = { ...(metadata.metadata ?? {}), ...(result.metadata ?? {}) }
-      yield* put(saveProvider, {
-        type: "api",
-        key: result.key ?? apiKey,
-        ...(Object.keys(merged).length ? { metadata: merged } : {}),
-      })
+      yield* put(
+        saveProvider,
+        {
+          type: "api",
+          key: result.key ?? apiKey,
+          ...(Object.keys(merged).length ? { metadata: merged } : {}),
+        },
+        accountName,
+      )
       yield* Prompt.log.success("Login successful")
     }
     yield* Prompt.outro("Done")
@@ -241,7 +266,12 @@ export const ProvidersCommand = cmd({
   aliases: ["auth"],
   describe: "manage AI providers and credentials",
   builder: (yargs) =>
-    yargs.command(ProvidersListCommand).command(ProvidersLoginCommand).command(ProvidersLogoutCommand).demandCommand(),
+    yargs
+      .command(ProvidersListCommand)
+      .command(ProvidersLoginCommand)
+      .command(ProvidersUseCommand)
+      .command(ProvidersLogoutCommand)
+      .demandCommand(),
   async handler() {},
 })
 
@@ -260,12 +290,13 @@ export const ProvidersListCommand = effectCmd({
     const homedir = os.homedir()
     const displayPath = authPath.startsWith(homedir) ? authPath.replace(homedir, "~") : authPath
     yield* Prompt.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
-    const results = Object.entries(yield* Effect.orDie(authSvc.all()))
+    const results = yield* Effect.orDie(authSvc.accounts())
     const database = yield* modelsDev.get()
 
-    for (const [providerID, result] of results) {
-      const name = database[providerID]?.name || providerID
-      yield* Prompt.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}`)
+    for (const result of results) {
+      const name = database[result.providerID]?.name || result.providerID
+      const active = result.active ? " active" : ""
+      yield* Prompt.log.info(`${name} — ${result.label} ${UI.Style.TEXT_DIM}${result.type}${active}`)
     }
 
     yield* Prompt.outro(`${results.length} credentials`)
@@ -316,6 +347,11 @@ export const ProvidersLoginCommand = effectCmd({
         alias: ["m"],
         describe: "login method label (skips method selection)",
         type: "string",
+      })
+      .option("name", {
+        alias: ["n"],
+        describe: "name used to identify this account",
+        type: "string",
       }),
   handler: Effect.fn("Cli.providers.login")(function* (args) {
     const authSvc = yield* Auth.Service
@@ -345,7 +381,9 @@ export const ProvidersLoginCommand = effectCmd({
         yield* Prompt.outro("Done")
         return
       }
-      yield* Effect.orDie(authSvc.set(url, { type: "wellknown", key: wellknown.auth.env, token: token.trim() }))
+      yield* Effect.orDie(
+        authSvc.add(url, { type: "wellknown", key: wellknown.auth.env, token: token.trim() }, args.name),
+      )
       yield* Prompt.log.success("Logged into " + url)
       yield* Prompt.outro("Done")
       return
@@ -430,7 +468,7 @@ export const ProvidersLoginCommand = effectCmd({
 
     const plugin = hooks.findLast((x) => x.auth?.provider === provider)
     if (plugin && plugin.auth) {
-      const handled = yield* handlePluginAuth({ auth: plugin.auth! }, provider, args.method)
+      const handled = yield* handlePluginAuth({ auth: plugin.auth! }, provider, args.method, args.name)
       if (handled) return
     }
 
@@ -444,7 +482,7 @@ export const ProvidersLoginCommand = effectCmd({
 
       const customPlugin = hooks.findLast((x) => x.auth?.provider === provider)
       if (customPlugin && customPlugin.auth) {
-        const handled = yield* handlePluginAuth({ auth: customPlugin.auth! }, provider, args.method)
+        const handled = yield* handlePluginAuth({ auth: customPlugin.auth! }, provider, args.method, args.name)
         if (handled) return
       }
 
@@ -482,20 +520,73 @@ export const ProvidersLoginCommand = effectCmd({
       validate: (x) => (x && x.length > 0 ? undefined : "Required"),
     })
     const apiKey = yield* promptValue(key)
-    yield* Effect.orDie(authSvc.set(provider, { type: "api", key: apiKey }))
+    yield* Effect.orDie(authSvc.add(provider, { type: "api", key: apiKey }, args.name))
 
     yield* Prompt.outro("Done")
   }),
 })
 
-export const ProvidersLogoutCommand = effectCmd({
-  command: "logout [provider]",
-  describe: "log out from a configured provider",
+export const ProvidersUseCommand = effectCmd({
+  command: "use [provider] [account]",
+  describe: "select the active account for a provider",
   builder: (yargs) =>
-    yargs.positional("provider", {
-      describe: "provider id or name to log out from",
-      type: "string",
-    }),
+    yargs
+      .positional("provider", { describe: "provider id or name", type: "string" })
+      .positional("account", { describe: "account id or name", type: "string" }),
+  instance: false,
+  handler: Effect.fn("Cli.providers.use")(function* (args) {
+    const auth = yield* Auth.Service
+    const modelsDev = yield* ModelsDev.Service
+    const database = yield* modelsDev.get()
+    const accounts = yield* Effect.orDie(auth.accounts())
+    UI.empty()
+    yield* Prompt.intro("Select active account")
+    if (accounts.length === 0) return yield* fail("No credentials found")
+
+    const matches = args.provider
+      ? accounts.filter(
+          (account) =>
+            account.providerID === args.provider ||
+            database[account.providerID]?.name?.toLowerCase() === args.provider?.toLowerCase(),
+        )
+      : accounts
+    if (matches.length === 0) return yield* fail(`Unknown configured provider "${args.provider}"`)
+    const selected = args.account
+      ? matches.find(
+          (account) => account.id === args.account || account.label.toLowerCase() === args.account?.toLowerCase(),
+        )
+      : matches.length === 1
+        ? matches[0]
+        : yield* promptValue(
+            yield* Prompt.autocomplete({
+              message: "Select account",
+              maxItems: 8,
+              options: matches.map((account) => ({
+                label: `${database[account.providerID]?.name || account.providerID} — ${account.label}`,
+                value: account,
+                hint: account.active ? "active" : account.type,
+              })),
+            }),
+          )
+    if (!selected) return yield* fail(`Unknown account "${args.account}"`)
+    yield* Effect.orDie(auth.select(selected.providerID, selected.id))
+    yield* Prompt.outro(`Using ${selected.label}`)
+  }),
+})
+
+export const ProvidersLogoutCommand = effectCmd({
+  command: "logout [provider] [account]",
+  describe: "remove a provider account",
+  builder: (yargs) =>
+    yargs
+      .positional("provider", {
+        describe: "provider id or name to log out from",
+        type: "string",
+      })
+      .positional("account", {
+        describe: "account id or name to remove",
+        type: "string",
+      }),
   // Removes a global auth credential; no project instance needed.
   instance: false,
   handler: Effect.fn("Cli.providers.logout")(function* (args) {
@@ -503,32 +594,42 @@ export const ProvidersLogoutCommand = effectCmd({
     const modelsDev = yield* ModelsDev.Service
 
     UI.empty()
-    const credentials: Array<[string, Auth.Info]> = Object.entries(yield* Effect.orDie(authSvc.all()))
+    const credentials = yield* Effect.orDie(authSvc.accounts())
     yield* Prompt.intro("Remove credential")
     if (credentials.length === 0) {
       yield* Prompt.log.error("No credentials found")
       return
     }
     const database = yield* modelsDev.get()
-    const options = credentials.map(([key, value]) => ({
-      label: (database[key]?.name || key) + UI.Style.TEXT_DIM + " (" + value.type + ")",
-      value: key,
-    }))
-    const provider = args.provider
-      ? options.find(
-          (option) =>
-            option.value === args.provider ||
-            database[option.value]?.name?.toLowerCase() === args.provider?.toLowerCase(),
-        )?.value
-      : yield* promptValue(
-          yield* Prompt.autocomplete({
-            message: "Select provider",
-            maxItems: 8,
-            options,
-          }),
+    const matches = args.provider
+      ? credentials.filter(
+          (account) =>
+            account.providerID === args.provider ||
+            database[account.providerID]?.name?.toLowerCase() === args.provider?.toLowerCase(),
         )
-    if (!provider) return yield* fail(`Unknown configured provider "${args.provider}"`)
-    yield* Effect.orDie(authSvc.remove(provider))
+      : credentials
+    if (matches.length === 0) return yield* fail(`Unknown configured provider "${args.provider}"`)
+    const options = matches.map((account) => ({
+      label:
+        (database[account.providerID]?.name || account.providerID) +
+        ` — ${account.label}` +
+        UI.Style.TEXT_DIM +
+        ` (${account.type}${account.active ? ", active" : ""})`,
+      value: account,
+    }))
+    const account = args.account
+      ? matches.find((item) => item.id === args.account || item.label.toLowerCase() === args.account?.toLowerCase())
+      : options.length === 1
+        ? options[0].value
+        : yield* promptValue(
+            yield* Prompt.autocomplete({
+              message: "Select account",
+              maxItems: 8,
+              options,
+            }),
+          )
+    if (!account) return yield* fail(`Unknown configured account "${args.account ?? args.provider}"`)
+    yield* Effect.orDie(authSvc.removeAccount(account.providerID, account.id))
     yield* Prompt.outro("Logout successful")
   }),
 })

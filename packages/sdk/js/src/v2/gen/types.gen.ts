@@ -106,6 +106,21 @@ export type QuestionRejected = {
   requestID: string
 }
 
+export type AuthAccount = {
+  id: string
+  providerID: string
+  label: string
+  type: "oauth" | "api" | "wellknown"
+  active: boolean
+}
+
+export type InvalidRequestError = {
+  _tag: "InvalidRequestError"
+  message: string
+  kind?: string
+  field?: string
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -133,13 +148,6 @@ export type Auth = OAuth | ApiAuth | WellKnownAuth
 
 export type EffectHttpApiErrorBadRequest = {
   _tag: "BadRequest"
-}
-
-export type InvalidRequestError = {
-  _tag: "InvalidRequestError"
-  message: string
-  kind?: string
-  field?: string
 }
 
 export type MoveSessionError = {
@@ -7102,6 +7110,31 @@ export type BadRequestError = {
   }
 }
 
+export type AuthListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/auth"
+}
+
+export type AuthListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AuthListError = AuthListErrors[keyof AuthListErrors]
+
+export type AuthListResponses = {
+  /**
+   * Success
+   */
+  200: Array<AuthAccount>
+}
+
+export type AuthListResponse = AuthListResponses[keyof AuthListResponses]
+
 export type AuthRemoveData = {
   body?: never
   path: {
@@ -7129,6 +7162,36 @@ export type AuthRemoveResponses = {
 
 export type AuthRemoveResponse = AuthRemoveResponses[keyof AuthRemoveResponses]
 
+export type AuthAddData = {
+  body?: {
+    auth: Auth
+    label?: string
+  }
+  path: {
+    providerID: string
+  }
+  query?: never
+  url: "/auth/{providerID}"
+}
+
+export type AuthAddErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type AuthAddError = AuthAddErrors[keyof AuthAddErrors]
+
+export type AuthAddResponses = {
+  /**
+   * AuthAccount
+   */
+  200: AuthAccount
+}
+
+export type AuthAddResponse = AuthAddResponses[keyof AuthAddResponses]
+
 export type AuthSetData = {
   body?: Auth
   path: {
@@ -7155,6 +7218,62 @@ export type AuthSetResponses = {
 }
 
 export type AuthSetResponse = AuthSetResponses[keyof AuthSetResponses]
+
+export type AuthSelectData = {
+  body?: never
+  path: {
+    providerID: string
+    accountID: string
+  }
+  query?: never
+  url: "/auth/{providerID}/{accountID}/active"
+}
+
+export type AuthSelectErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type AuthSelectError = AuthSelectErrors[keyof AuthSelectErrors]
+
+export type AuthSelectResponses = {
+  /**
+   * Successfully selected authentication account
+   */
+  200: boolean
+}
+
+export type AuthSelectResponse = AuthSelectResponses[keyof AuthSelectResponses]
+
+export type AuthRemoveAccountData = {
+  body?: never
+  path: {
+    providerID: string
+    accountID: string
+  }
+  query?: never
+  url: "/auth/{providerID}/{accountID}"
+}
+
+export type AuthRemoveAccountErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type AuthRemoveAccountError = AuthRemoveAccountErrors[keyof AuthRemoveAccountErrors]
+
+export type AuthRemoveAccountResponses = {
+  /**
+   * Successfully removed authentication account
+   */
+  200: boolean
+}
+
+export type AuthRemoveAccountResponse = AuthRemoveAccountResponses[keyof AuthRemoveAccountResponses]
 
 export type AppLogData = {
   body?: {
@@ -9407,6 +9526,7 @@ export type ProviderOauthAuthorizeData = {
     inputs?: {
       [key: string]: string
     }
+    label?: string
   }
   path: {
     providerID: string

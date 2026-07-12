@@ -13,7 +13,6 @@ import { showToast } from "@/utils/toast"
 import {
   type Accessor,
   type Component,
-  createEffect,
   createMemo,
   createResource,
   Match,
@@ -32,7 +31,7 @@ import { CustomProviderForm } from "./dialog-custom-provider"
 
 const CUSTOM_ID = "_custom"
 
-export function useProviderConnectController(options: { onBack?: () => void } = {}) {
+export function useProviderConnectController(options: { onBack?: () => void; onConnected?: () => void } = {}) {
   const [store, setStore] = createStore({ selected: undefined as string | undefined })
   const reset = () => setStore("selected", undefined)
 
@@ -40,6 +39,7 @@ export function useProviderConnectController(options: { onBack?: () => void } = 
     selected: () => store.selected,
     select: (provider?: string) => setStore("selected", provider),
     back: options.onBack ?? reset,
+    connected: options.onConnected ?? (() => undefined),
   }
 }
 
@@ -83,6 +83,7 @@ export const DialogConnectProvider: Component<{
               provider={provider()}
               directory={props.directory}
               onBack={reset}
+              onConnected={controller.connected}
               setBack={(handler) => (back.current = handler)}
             />
           )}
@@ -167,6 +168,7 @@ function ProviderConnection(props: {
   provider: string
   directory?: Accessor<string | undefined>
   onBack: () => void
+  onConnected: () => void
   setBack: (handler: () => void) => void
 }) {
   const dialog = useDialog()
@@ -211,6 +213,7 @@ function ProviderConnection(props: {
     methodIndex: undefined as undefined | number,
     authorization: undefined as undefined | ProviderAuthAuthorization,
     promptInputs: undefined as undefined | Record<string, string>,
+    accountLabel: "",
     state: "pending" as undefined | "pending" | "complete" | "error" | "prompt",
     error: undefined as string | undefined,
   })
@@ -328,6 +331,7 @@ function ProviderConnection(props: {
             providerID: props.provider,
             method: index,
             inputs,
+            label: store.accountLabel.trim() || undefined,
           },
           { throwOnError: true },
         )
@@ -487,18 +491,9 @@ function ProviderConnection(props: {
     listRef?.onKeyDown(e)
   }
 
-  let auto = false
-  createEffect(() => {
-    if (auto) return
-    if (loading()) return
-    if (methods().length === 1) {
-      auto = true
-      void selectMethod(0)
-    }
-  })
-
   async function complete() {
     await serverSDK().client.global.dispose()
+    props.onConnected()
     dialog.close()
     showToast({
       variant: "success",
@@ -521,6 +516,14 @@ function ProviderConnection(props: {
   function MethodSelection() {
     return (
       <>
+        <TextField
+          type="text"
+          label={language.t("provider.connect.accountName.label")}
+          description={language.t("provider.connect.accountName.description")}
+          placeholder={language.t("provider.connect.accountName.placeholder")}
+          value={store.accountLabel}
+          onChange={(value) => setStore("accountLabel", value)}
+        />
         <div class="text-14-regular text-text-base">
           {language.t("provider.connect.selectMethod", { provider: provider().name })}
         </div>
@@ -555,6 +558,7 @@ function ProviderConnection(props: {
     const [formStore, setFormStore] = createStore({
       value: "",
       error: undefined as string | undefined,
+      submitting: false,
     })
 
     async function handleSubmit(e: SubmitEvent) {
@@ -570,14 +574,27 @@ function ProviderConnection(props: {
       }
 
       setFormStore("error", undefined)
-      await serverSDK().client.auth.set({
-        providerID: props.provider,
-        auth: {
-          type: "api",
-          key: apiKey,
-          ...(store.promptInputs ? { metadata: store.promptInputs } : {}),
-        },
-      })
+      setFormStore("submitting", true)
+      const result = await serverSDK()
+        .client.auth.add(
+          {
+            providerID: props.provider,
+            label: store.accountLabel.trim() || undefined,
+            auth: {
+              type: "api",
+              key: apiKey,
+              ...(store.promptInputs ? { metadata: store.promptInputs } : {}),
+            },
+          },
+          { throwOnError: true },
+        )
+        .then(() => ({ ok: true as const }))
+        .catch((error: unknown) => ({ ok: false as const, error }))
+      if (!result.ok) {
+        setFormStore("submitting", false)
+        setFormStore("error", formatError(result.error, language.t("common.requestFailed")))
+        return
+      }
       await complete()
     }
 
@@ -615,7 +632,7 @@ function ProviderConnection(props: {
             validationState={formStore.error ? "invalid" : undefined}
             error={formStore.error}
           />
-          <Button class="w-auto" type="submit" size="large" variant="primary">
+          <Button class="w-auto" type="submit" size="large" variant="primary" disabled={formStore.submitting}>
             {language.t("common.continue")}
           </Button>
         </form>

@@ -1,10 +1,12 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
+import type { AuthAccount } from "@opencode-ai/sdk/v2/client"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
-import { createMemo, type Component, For, Show } from "solid-js"
+import { createMemo, createResource, type Component, For, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -35,7 +37,17 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   const serverSdk = useServerSDK()
   const serverSync = useServerSync()
   const providers = useProviders()
-  const providerConnect = useProviderConnectController({ onBack: props.onBack })
+  const [accountsResult, { refetch: refreshAccounts }] = createResource(async () => {
+    return serverSdk()
+      .client.auth.list({ throwOnError: true })
+      .then((response) => ({ accounts: response.data ?? [], error: undefined }))
+      .catch((error: unknown) => ({
+        accounts: [] as AuthAccount[],
+        error: requestError(error),
+      }))
+  })
+  const [mutating, setMutating] = createStore<Record<string, "select" | "remove" | undefined>>({})
+  const providerConnect = useProviderConnectController({ onBack: props.onBack, onConnected: refreshAccounts })
 
   const connect = (provider?: string) => {
     providerConnect.select(provider)
@@ -77,7 +89,10 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
     return language.t("settings.providers.tag.other")
   }
 
-  const canDisconnect = (item: ProviderItem) => source(item) !== "env"
+  const accounts = (providerID: string) =>
+    (accountsResult()?.accounts ?? []).filter((account) => account.providerID === providerID)
+
+  const canManage = (item: ProviderItem) => source(item) !== "env" || accounts(item.id).length > 0
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
 
@@ -89,51 +104,42 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
     return true
   }
 
-  const disableProvider = async (providerID: string, name: string) => {
-    const before = serverSync().data.config.disabled_providers ?? []
-    const next = before.includes(providerID) ? before : [...before, providerID]
-    serverSync().set("config", "disabled_providers", next)
-
-    await serverSync()
-      .updateConfig({ disabled_providers: next })
-      .then(() => {
-        showToast({
-          variant: "success",
-          icon: "circle-check",
-          title: language.t("provider.disconnect.toast.disconnected.title", { provider: name }),
-          description: language.t("provider.disconnect.toast.disconnected.description", { provider: name }),
-        })
-      })
-      .catch((err: unknown) => {
-        serverSync().set("config", "disabled_providers", before)
-        const message = err instanceof Error ? err.message : String(err)
-        showToast({ title: language.t("common.requestFailed"), description: message })
-      })
-  }
-
-  const disconnect = async (providerID: string, name: string) => {
-    if (isConfigCustom(providerID)) {
-      await serverSdk()
-        .client.auth.remove({ providerID })
-        .catch(() => undefined)
-      await disableProvider(providerID, name)
-      return
-    }
+  const selectAccount = async (account: AuthAccount) => {
+    setMutating(account.id, "select")
     await serverSdk()
-      .client.auth.remove({ providerID })
+      .client.auth.select({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
       .then(async () => {
         await serverSdk().client.global.dispose()
+        await refreshAccounts()
         showToast({
           variant: "success",
           icon: "circle-check",
-          title: language.t("provider.disconnect.toast.disconnected.title", { provider: name }),
-          description: language.t("provider.disconnect.toast.disconnected.description", { provider: name }),
+          title: language.t("settings.providers.account.select.success", { account: account.label }),
         })
       })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err)
-        showToast({ title: language.t("common.requestFailed"), description: message })
+      .catch((error: unknown) => {
+        showToast({ title: language.t("settings.providers.account.select.error"), description: requestError(error) })
       })
+    setMutating(account.id, undefined)
+  }
+
+  const removeAccount = async (account: AuthAccount) => {
+    setMutating(account.id, "remove")
+    await serverSdk()
+      .client.auth.removeAccount({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
+      .then(async () => {
+        await serverSdk().client.global.dispose()
+        await refreshAccounts()
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.providers.account.remove.success", { account: account.label }),
+        })
+      })
+      .catch((error: unknown) => {
+        showToast({ title: language.t("settings.providers.account.remove.error"), description: requestError(error) })
+      })
+    setMutating(account.id, undefined)
   }
 
   return (
@@ -145,6 +151,14 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
       <div class="settings-v2-tab-body settings-v2-providers">
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
+          <Show when={accountsResult.loading}>
+            <p class="settings-v2-provider-account-status">{language.t("settings.providers.accounts.loading")}</p>
+          </Show>
+          <Show when={accountsResult()?.error}>
+            <p class="settings-v2-provider-account-status settings-v2-provider-account-status--error">
+              {language.t("settings.providers.accounts.loadError")}
+            </p>
+          </Show>
           <SettingsListV2>
             <Show
               when={connected().length > 0}
@@ -153,34 +167,86 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
               }
             >
               <For each={connected()}>
-                {(item) => (
-                  <div class="settings-v2-provider-row group">
-                    <div class="settings-v2-provider-lead">
-                      <ProviderIcon
-                        id={item.id}
-                        width={PROVIDER_ICON_SIZE}
-                        height={PROVIDER_ICON_SIZE}
-                        class="settings-v2-provider-icon shrink-0"
-                      />
-                      <div class="settings-v2-provider-main">
-                        <span class="settings-v2-provider-name truncate">{item.name}</span>
-                        <Tag>{type(item)}</Tag>
+                {(item) => {
+                  const providerAccounts = () => accounts(item.id)
+                  return (
+                    <div class="settings-v2-provider-row settings-v2-provider-row--accounts group">
+                      <div class="settings-v2-provider-header">
+                        <div class="settings-v2-provider-lead">
+                          <ProviderIcon
+                            id={item.id}
+                            width={PROVIDER_ICON_SIZE}
+                            height={PROVIDER_ICON_SIZE}
+                            class="settings-v2-provider-icon shrink-0"
+                          />
+                          <div class="settings-v2-provider-main">
+                            <span class="settings-v2-provider-name truncate">{item.name}</span>
+                            <Tag>{type(item)}</Tag>
+                          </div>
+                        </div>
+                        <Show
+                          when={canManage(item)}
+                          fallback={
+                            <span class="settings-v2-provider-env-hint">
+                              {language.t("settings.providers.connected.environmentDescription")}
+                            </span>
+                          }
+                        >
+                          <ButtonV2 size="normal" variant="ghost-muted" icon="plus" onClick={() => connect(item.id)}>
+                            {language.t("settings.providers.account.add")}
+                          </ButtonV2>
+                        </Show>
                       </div>
+                      <Show when={providerAccounts().length > 0}>
+                        <div class="settings-v2-provider-accounts">
+                          <For each={providerAccounts()}>
+                            {(account) => (
+                              <div class="settings-v2-provider-account">
+                                <div class="settings-v2-provider-account-copy">
+                                  <span class="settings-v2-provider-account-name">{account.label}</span>
+                                  <span class="settings-v2-provider-account-type">
+                                    {account.type === "api"
+                                      ? language.t("provider.connect.method.apiKey")
+                                      : account.type === "oauth"
+                                        ? language.t("settings.providers.account.oauth")
+                                        : language.t("settings.providers.account.managed")}
+                                  </span>
+                                  <Show when={account.active}>
+                                    <Tag>{language.t("settings.providers.account.active")}</Tag>
+                                  </Show>
+                                </div>
+                                <div class="settings-v2-provider-account-actions">
+                                  <Show when={!account.active}>
+                                    <ButtonV2
+                                      size="small"
+                                      variant="ghost-muted"
+                                      disabled={!!mutating[account.id]}
+                                      onClick={() => void selectAccount(account)}
+                                    >
+                                      {mutating[account.id] === "select"
+                                        ? language.t("settings.providers.account.switching")
+                                        : language.t("settings.providers.account.use")}
+                                    </ButtonV2>
+                                  </Show>
+                                  <ButtonV2
+                                    size="small"
+                                    variant="ghost-muted"
+                                    disabled={!!mutating[account.id]}
+                                    onClick={() => void removeAccount(account)}
+                                  >
+                                    {mutating[account.id] === "remove"
+                                      ? language.t("settings.providers.account.removing")
+                                      : language.t("settings.providers.account.remove")}
+                                  </ButtonV2>
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
                     </div>
-                    <Show
-                      when={canDisconnect(item)}
-                      fallback={
-                        <span class="settings-v2-provider-env-hint">
-                          {language.t("settings.providers.connected.environmentDescription")}
-                        </span>
-                      }
-                    >
-                      <ButtonV2 size="normal" variant="ghost-muted" onClick={() => void disconnect(item.id, item.name)}>
-                        {language.t("common.disconnect")}
-                      </ButtonV2>
-                    </Show>
-                  </div>
-                )}
+                  )
+                }}
               </For>
             </Show>
           </SettingsListV2>
@@ -254,4 +320,13 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
       </div>
     </>
   )
+}
+
+function requestError(error: unknown) {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: { message?: unknown } }).data
+    if (typeof data?.message === "string") return data.message
+  }
+  if (error instanceof Error) return error.message
+  return String(error)
 }
