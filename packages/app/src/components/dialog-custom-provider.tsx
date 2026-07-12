@@ -135,7 +135,7 @@ export function CustomProviderForm() {
       const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
 
       if (result.key) {
-        await serverSDK().client.auth.set({
+        await serverSDK().client.auth.add({
           providerID: result.providerID,
           auth: {
             type: "api",
