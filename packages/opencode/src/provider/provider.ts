@@ -1144,6 +1144,7 @@ export type DefaultModelError = ModelNotFoundError | NoProvidersError | NoModels
 export type Error = ModelNotFoundError | InitError | NoProvidersError | NoModelsError
 
 export interface Interface {
+  readonly refresh: () => Effect.Effect<void>
   readonly list: () => Effect.Effect<Record<ProviderV2.ID, Info>>
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
@@ -1962,7 +1963,14 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    // Drop cached provider info, SDK clients, and language models across every
+    // instance so the next request rebuilds them with the current active account.
+    // Running generations keep their already-resolved model references untouched.
+    const refresh = Effect.fn("Provider.refresh")(function* () {
+      yield* InstanceState.invalidateAll(state)
+    })
+
+    return Service.of({ refresh, list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
   }),
 )
 

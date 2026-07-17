@@ -4,11 +4,13 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { RootHttpApi } from "../api"
 import { LogInput } from "../groups/control"
+import { Provider } from "@/provider/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 
 export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (handlers) =>
   Effect.gen(function* () {
     const auth = yield* Auth.Service
+    const provider = yield* Provider.Service
 
     const authList = Effect.fn("ControlHttpApi.authList")(function* () {
       return yield* auth.accounts().pipe(Effect.orDie)
@@ -25,6 +27,7 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
       params: { providerID: ProviderV2.ID; accountID: string }
     }) {
       yield* auth.select(ctx.params.providerID, ctx.params.accountID).pipe(Effect.orDie)
+      yield* provider.refresh()
       return true
     })
 
@@ -32,6 +35,7 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
       params: { providerID: ProviderV2.ID; accountID: string }
     }) {
       yield* auth.removeAccount(ctx.params.providerID, ctx.params.accountID).pipe(Effect.orDie)
+      yield* provider.refresh()
       return true
     })
 
