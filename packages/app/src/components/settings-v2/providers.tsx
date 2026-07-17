@@ -109,7 +109,6 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
     await serverSdk()
       .client.auth.select({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
       .then(async () => {
-        await serverSdk().client.global.dispose()
         await refreshAccounts()
         showToast({
           variant: "success",
@@ -128,7 +127,6 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
     await serverSdk()
       .client.auth.removeAccount({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
       .then(async () => {
-        await serverSdk().client.global.dispose()
         await refreshAccounts()
         showToast({
           variant: "success",

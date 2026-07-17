@@ -115,7 +115,6 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
     await serverSDK()
       .client.auth.select({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
       .then(async () => {
-        await serverSDK().client.global.dispose()
         await refreshAccounts()
         showToast({
           variant: "success",
@@ -134,7 +133,6 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
     await serverSDK()
       .client.auth.removeAccount({ providerID: account.providerID, accountID: account.id }, { throwOnError: true })
       .then(async () => {
-        await serverSDK().client.global.dispose()
         await refreshAccounts()
         showToast({
           variant: "success",
