@@ -46,6 +46,7 @@ export type PromptInputV2ComposerProps = {
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "edit" | "onEditLoaded" | "submission">
 export type PromptInputV2ComposerController = PromptInputV2Interaction & {
   readonly model: PromptInputProps["controls"]["model"]
+  readonly autoAccept: { active: () => boolean; toggle: () => void }
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
@@ -61,7 +62,12 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
       <PromptInputV2
         controller={props.controller}
         class={props.class}
-        controls={<PromptInputV2VoiceControl controller={props.controller} />}
+        controls={
+          <>
+            <PromptInputV2VoiceControl controller={props.controller} />
+            <PromptInputV2AutoAcceptControl controller={props.controller} />
+          </>
+        }
         modelControl={
           <PromptInputV2ModelControl
             loading={props.controller.model.loading}
@@ -335,6 +341,40 @@ function PromptInputV2VoiceControl(props: { controller: PromptInputV2ComposerCon
   )
 }
 
+function PromptInputV2AutoAcceptControl(props: { controller: PromptInputV2ComposerController }) {
+  const command = useCommand()
+  const language = useLanguage()
+  const active = () => props.controller.autoAccept.active()
+  const label = createMemo(() =>
+    language.t(active() ? "command.permissions.autoaccept.disable" : "command.permissions.autoaccept.enable"),
+  )
+
+  return (
+    <TooltipV2
+      placement="top"
+      value={
+        <>
+          {label()}
+          <KeybindV2 keys={command.keybindParts("permissions.autoaccept")} variant="neutral" />
+        </>
+      }
+    >
+      <ButtonV2
+        data-action="prompt-permissions"
+        variant="ghost-muted"
+        size="normal"
+        class="size-7 shrink-0 p-0"
+        classList={{ "text-v2-state-fg-success": active() }}
+        onClick={props.controller.autoAccept.toggle}
+        aria-label={label()}
+        aria-pressed={active()}
+      >
+        <Icon name="check" size="small" />
+      </ButtonV2>
+    </TooltipV2>
+  )
+}
+
 function voiceStartErrorMessage(error: unknown) {
   if (error instanceof DOMException && error.name === "NotAllowedError") {
     return "Microphone permission is blocked. Allow mic access to dictate locally."
@@ -466,6 +506,14 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
     return permission.isAutoAccepting(id, sdk().directory)
   })
+  const toggleAccept = () => {
+    const id = props.controls.session.id
+    if (!id) {
+      permission.toggleAutoAcceptDirectory(sdk().directory)
+      return
+    }
+    permission.toggleAutoAccept(id, sdk().directory)
+  }
   const submission = createPromptSubmit({
     prompt,
     info,
@@ -675,6 +723,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
   })
   Object.defineProperty(controller, "model", { get: () => props.controls.model })
+  Object.defineProperty(controller, "autoAccept", { get: () => ({ active: accepting, toggle: toggleAccept }) })
   return controller as PromptInputV2ComposerController
 }
 
