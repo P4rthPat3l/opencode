@@ -20,6 +20,8 @@ import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
+import { requestIdeEditorContext } from "@/context/ide-host"
+import type { IdeContext } from "@/context/ide-host-context"
 
 type PendingPrompt = {
   abort: AbortController
@@ -36,6 +38,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  ideContext?: IdeContext
 }
 
 type FollowupSendInput = {
@@ -112,6 +115,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
+    ideContext: input.draft.ideContext,
   })
 
   const message: Message = {
@@ -311,6 +315,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    const ideContext = mode === "normal" ? await requestIdeEditorContext()?.catch(() => undefined) : undefined
+
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
@@ -414,6 +420,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      ideContext,
     }
 
     const clearInput = () => {

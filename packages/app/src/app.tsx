@@ -53,6 +53,7 @@ import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
 import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
+import { IdeHostPromptBridge } from "@/context/ide-host"
 import { ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
@@ -354,7 +355,10 @@ function DraftProviders(props: ParentProps) {
   return (
     <FileProvider>
       <PromptProvider>
-        <CommentsProvider>{props.children}</CommentsProvider>
+        <CommentsProvider>
+          <IdeHostPromptBridge />
+          {props.children}
+        </CommentsProvider>
       </PromptProvider>
     </FileProvider>
   )

@@ -5,6 +5,7 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { Product } from "@opencode-ai/core/product"
 import { Effect, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -73,6 +74,20 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       return { healthy: true as const, version: InstallationVersion }
+    })
+
+    const product = Effect.fn("GlobalHttpApi.product")(function* () {
+      return {
+        product: "p4rth-opencode" as const,
+        runtimeVersion: InstallationVersion,
+        upstreamVersion: InstallationVersion,
+        protocolVersion: 1 as const,
+        webVersion: InstallationVersion,
+        runtimeChannel: "jetbrains-stable" as const,
+        jetbrainsBridgeVersion: 1 as const,
+        storageSchemaVersion: 1 as const,
+        capabilities: Product.capabilities.slice(),
+      }
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
@@ -147,6 +162,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     return handlers
       .handle("health", health)
+      .handle("product", product)
       .handleRaw("event", event)
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)

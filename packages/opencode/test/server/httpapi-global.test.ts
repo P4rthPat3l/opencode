@@ -11,6 +11,7 @@ import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
+import { Product } from "@opencode-ai/core/product"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
 import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/handlers/control-plane"
 import { globalHandlers } from "../../src/server/routes/instance/httpapi/handlers/global"
@@ -45,6 +46,22 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("exposes fork product identity and JetBrains bridge capabilities", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClient.get(GlobalPaths.product)
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toMatchObject({
+        product: Product.id,
+        protocolVersion: Product.protocolVersion,
+        runtimeChannel: Product.runtimeChannel,
+        jetbrainsBridgeVersion: Product.jetbrainsBridgeVersion,
+        storageSchemaVersion: Product.storageSchemaVersion,
+        capabilities: expect.arrayContaining(["jetbrains-context", "provider-multi-account"]),
+      })
+    }),
+  )
+
   it.live("upgrades to latest when the request body is omitted", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.post(GlobalPaths.upgrade)

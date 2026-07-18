@@ -4,10 +4,15 @@ import { Effect, Layer, Option, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Product } from "@opencode-ai/core/product"
+import { xdgData } from "xdg-basedir"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
 const file = path.join(Global.Path.data, "auth.json")
+const officialFile = path.join(xdgData!, "opencode", "auth.json")
+const importRecordFile = path.join(Global.Path.state, "auth-import.json")
+const importVersion = 1
 
 const fail = (message: string) => (cause: unknown) => new AuthError({ message, cause })
 
@@ -89,16 +94,7 @@ const layer = Layer.effect(
       return `Account ${index + 1}`
     }
 
-    const stored = Effect.fn("Auth.stored")(function* () {
-      const value = process.env.OPENCODE_AUTH_CONTENT
-        ? (() => {
-            try {
-              return JSON.parse(process.env.OPENCODE_AUTH_CONTENT)
-            } catch {
-              return {}
-            }
-          })()
-        : yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))
+    const decodeStore = (value: unknown) => {
       const data = value as Record<string, unknown>
       return Record.filterMap(data, (value, providerID) => {
         const current = decodeProvider(value)
@@ -113,10 +109,67 @@ const layer = Layer.effect(
           }),
         )
       })
+    }
+
+    const readCurrentStore = Effect.fn("Auth.readCurrentStore")(function* () {
+      const value = process.env.OPENCODE_AUTH_CONTENT
+        ? (() => {
+            try {
+              return JSON.parse(process.env.OPENCODE_AUTH_CONTENT)
+            } catch {
+              return {}
+            }
+          })()
+        : yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))
+      return decodeStore(value)
     })
 
     const write = (data: Record<string, StoredProvider>) =>
       fsys.writeJson(file, data, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))
+
+    const importOfficial = Effect.fn("Auth.importOfficial")(function* (current: Record<string, StoredProvider>) {
+      if (process.env.OPENCODE_AUTH_CONTENT) return current
+      if (process.env[`${Product.envPrefix}_DISABLE_OFFICIAL_AUTH_IMPORT`] === "1") return current
+      if (path.resolve(file) === path.resolve(officialFile)) return current
+      if (Object.keys(current).length > 0) return current
+      const existingImport = yield* fsys.readJson(importRecordFile).pipe(Effect.orElseSucceed(() => undefined))
+      if (existingImport) return current
+
+      const imported = decodeStore(yield* fsys.readJson(officialFile).pipe(Effect.orElseSucceed(() => ({}))))
+      if (Object.keys(imported).length === 0) return current
+
+      const labeled: Record<string, StoredProvider> = {}
+      for (const [providerID, provider] of Object.entries(imported)) {
+        const account = provider.accounts[0]
+        labeled[providerID] =
+          provider.accounts.length === 1 && account
+            ? new StoredProvider({
+                ...provider,
+                accounts: [new StoredAccount({ ...account, label: "Default" })],
+              })
+            : provider
+      }
+      yield* write(labeled)
+      yield* fsys
+        .writeJson(
+          importRecordFile,
+          {
+            product: Product.id,
+            migrationVersion: importVersion,
+            sourceProduct: "opencode",
+            sourceSchema: "auth.json",
+            importedAt: new Date().toISOString(),
+            providers: Object.keys(labeled),
+          },
+          0o600,
+        )
+        .pipe(Effect.mapError(fail("Failed to write auth import record")))
+      return labeled
+    })
+
+    const stored = Effect.fn("Auth.stored")(function* () {
+      return yield* importOfficial(yield* readCurrentStore())
+    })
 
     const all = Effect.fn("Auth.all")(function* () {
       return Record.filterMap(yield* stored(), (provider) => {

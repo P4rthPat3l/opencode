@@ -49,6 +49,7 @@ import { useLayout } from "@/context/layout"
 import { ModelsProvider } from "@/context/models"
 import { useNotification } from "@/context/notification"
 import { PromptProvider, usePrompt } from "@/context/prompt"
+import { IdeHostPromptBridge } from "@/context/ide-host"
 import { usePlatform } from "@/context/platform"
 import { SDKProvider, useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
@@ -318,7 +319,10 @@ function SessionProviders(props: ParentProps) {
     <TerminalProvider>
       <FileProvider>
         <PromptProvider>
-          <CommentsProvider>{props.children}</CommentsProvider>
+          <CommentsProvider>
+            <IdeHostPromptBridge />
+            {props.children}
+          </CommentsProvider>
         </PromptProvider>
       </FileProvider>
     </TerminalProvider>

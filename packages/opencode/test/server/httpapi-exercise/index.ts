@@ -22,6 +22,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import { TestLLMServer } from "../../lib/llm-server"
 import path from "path"
 import { array, boolean, check, isRecord, message, object, stable } from "./assertions"
+import { Product } from "@opencode-ai/core/product"
 import { controlledPtyInput, http, route } from "./dsl"
 import {
   cleanupExercisePaths,
@@ -64,6 +65,17 @@ const scenarios: Scenario[] = [
     .json(200, (body) => {
       object(body)
       check(body.healthy === true, "server should report healthy")
+    }),
+  http.protected
+    .get("/global/product", "global.product")
+    .global()
+    .json(200, (body) => {
+      object(body)
+      check(body.product === Product.id, "server should report fork product identity")
+      check(body.protocolVersion === Product.protocolVersion, "server should report protocol version")
+      check(body.jetbrainsBridgeVersion === Product.jetbrainsBridgeVersion, "server should report bridge version")
+      array(body.capabilities)
+      check(body.capabilities.includes("jetbrains-context"), "server should report JetBrains context capability")
     }),
   http.protected
     .get("/global/event", "global.event")

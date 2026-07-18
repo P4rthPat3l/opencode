@@ -524,6 +524,15 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     })
 
     createEffect(() => {
+      const current = route()
+      if (current.type !== "dir-new-sesssion") return
+      const root = rootFor(current.dir)
+      if (server.projects.list().some((project) => pathKey(project.worktree) === pathKey(root))) return
+      void serverSync().project.loadSessions(root)
+      server.projects.open(root)
+    })
+
+    createEffect(() => {
       const projects = enriched()
       if (projects.length === 0) return
       if (!serverSync().ready) return

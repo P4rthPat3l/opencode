@@ -6,31 +6,47 @@ import { Context, Effect, Layer } from "effect"
 import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
+import { Product } from "./product"
 
-const app = "opencode"
-const data = path.join(xdgData!, app)
-const cache = path.join(xdgCache!, app)
-const config = path.join(xdgConfig!, app)
-const state = path.join(xdgState!, app)
-const tmp = path.join(os.tmpdir(), app)
+const app = Product.id
+const forkData = `${Product.envPrefix}_DATA_DIR`
+const forkCache = `${Product.envPrefix}_CACHE_DIR`
+const forkConfig = `${Product.envPrefix}_CONFIG_DIR`
+const forkState = `${Product.envPrefix}_STATE_DIR`
+const forkLog = `${Product.envPrefix}_LOG_DIR`
 
-const paths = {
-  get home() {
-    return process.env.OPENCODE_TEST_HOME ?? os.homedir()
-  },
-  data,
-  bin: path.join(cache, "bin"),
-  log: path.join(data, "log"),
-  repos: path.join(data, "repos"),
-  cache,
-  config,
-  state,
-  tmp,
+function envPath(env: NodeJS.ProcessEnv, key: string, fallback: string) {
+  return env[key]?.trim() || fallback
 }
+
+export function resolvePaths(env: NodeJS.ProcessEnv = process.env) {
+  const data = envPath(env, forkData, path.join(xdgData!, app))
+  const cache = envPath(env, forkCache, path.join(xdgCache!, app))
+  const config = envPath(env, forkConfig, path.join(xdgConfig!, app))
+  const state = envPath(env, forkState, path.join(xdgState!, app))
+  const tmp = path.join(os.tmpdir(), envPath(env, `${Product.envPrefix}_TMP_NAME`, app))
+  const log = envPath(env, forkLog, path.join(data, "log"))
+
+  return {
+    get home() {
+      return env.OPENCODE_TEST_HOME ?? os.homedir()
+    },
+    data,
+    bin: path.join(cache, "bin"),
+    log,
+    repos: path.join(data, "repos"),
+    cache,
+    config,
+    state,
+    tmp,
+  }
+}
+
+const paths = resolvePaths()
 
 export const Path = paths
 
-Flock.setGlobal({ state })
+Flock.setGlobal({ state: Path.state })
 
 await Promise.all([
   fs.mkdir(Path.data, { recursive: true }),
@@ -61,7 +77,7 @@ export function make(input: Partial<Interface> = {}): Interface {
     home: Path.home,
     data: Path.data,
     cache: Path.cache,
-    config: Flag.OPENCODE_CONFIG_DIR ?? Path.config,
+    config: process.env[forkConfig] ?? Flag.OPENCODE_CONFIG_DIR ?? Path.config,
     state: Path.state,
     tmp: Path.tmp,
     bin: Path.bin,
