@@ -240,7 +240,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const sunset = oldInterfaceSunset
     const [oldInterfaceRetired, setOldInterfaceRetired] = createSignal(sunset ? Date.now() >= sunset.getTime() : false)
     const layoutTransitionClassified = createMemo(() => typeof store.general?.layoutTransitionEligible === "boolean")
-    const layoutTransitionEligible = withFallback(() => store.general?.layoutTransitionEligible, false)
+    const layoutTransitionEligible = withFallback(() => store.general?.layoutTransitionEligible, true)
     const newInterfaceNoticeDismissed = withFallback(() => store.general?.newInterfaceNoticeDismissed, false)
     const layoutUpgrade = createMemo(() =>
       launchState.classified && !launchState.migrationApplied
