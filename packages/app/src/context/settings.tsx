@@ -56,8 +56,8 @@ export interface Settings {
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
-const legacyNewLayoutDesignsDefault = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
-export const newLayoutDesignsDefault = true
+const legacyNewLayoutDesignsDefault = false
+export const newLayoutDesignsDefault = false
 // Existing users can switch layouts until local midnight on this date. Set new Date(YYYY, M-1, D) to show.
 export const oldInterfaceSunset = new Date(2026, 8, 14)
 const newLayoutDesignsUpgradeCutoff = "1.17.19"
@@ -227,7 +227,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     )
     const [launchState, setLaunchState] = createStore({
       classified: false,
-      migrationApplied: false,
       previous: undefined as string | undefined,
     })
     const showFileTree = withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree)
@@ -242,16 +241,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const layoutTransitionClassified = createMemo(() => typeof store.general?.layoutTransitionEligible === "boolean")
     const layoutTransitionEligible = withFallback(() => store.general?.layoutTransitionEligible, true)
     const newInterfaceNoticeDismissed = withFallback(() => store.general?.newInterfaceNoticeDismissed, false)
-    const layoutUpgrade = createMemo(() =>
-      launchState.classified && !launchState.migrationApplied
-        ? shouldEnableNewLayout(launchState.previous, platform.version)
-        : false,
-    )
     const layoutTransition = createMemo(() =>
       layoutTransitionState(!!sunset, layoutTransitionEligible(), oldInterfaceRetired(), newInterfaceNoticeDismissed()),
     )
     const newLayoutDesigns = createMemo(() => {
-      if (layoutUpgrade()) return true
       if (!ready() && !oldInterfaceRetired()) return legacyNewLayoutDesignsDefault
       if (!layoutTransitionClassified()) {
         return resolveNewLayoutDesigns(
@@ -291,14 +284,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       })
       if (!platform.version || launch.version === platform.version) return
       setLaunch("version", platform.version)
-    })
-
-    createEffect(() => {
-      if (!ready() || !launchState.classified || launchState.migrationApplied) return
-      if (layoutUpgrade() && store.general?.newLayoutDesigns !== true) {
-        setStore("general", "newLayoutDesigns", true)
-      }
-      setLaunchState("migrationApplied", true)
     })
 
     createEffect(() => {
