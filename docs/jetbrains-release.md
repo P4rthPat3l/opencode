@@ -30,6 +30,7 @@ cargo build --release
 
 cd ../opencode
 OPENCODE_VERSION=0.1.0 bun run build --single --skip-install
+bun run package:release
 
 cd ../../sdks/jetbrains
 ./gradlew packageRuntimeRelease \
@@ -40,8 +41,14 @@ cd ../../sdks/jetbrains
 The release files are written to:
 
 ```text
+packages/opencode/dist/opencode-linux-x64.tar.gz
 sdks/jetbrains/build/release/0.1.0/
 ```
+
+Upload both kinds of assets if you want users to install your fork directly and also let the plugin auto-download the runtime:
+
+- standalone CLI archive from `packages/opencode/dist/`
+- JetBrains runtime ZIP(s) plus `p4rth-opencode-jetbrains-runtime.json` from `sdks/jetbrains/build/release/<version>/`
 
 Inspect them before upload:
 
@@ -56,6 +63,7 @@ Create the GitHub Release:
 
 ```bash
 gh release create v0.1.0 \
+  ../../packages/opencode/dist/opencode-linux-x64.tar.gz \
   build/release/0.1.0/* \
   --repo P4rthPat3l/opencode \
   --title "P4rth OpenCode 0.1.0" \
@@ -115,6 +123,21 @@ The task fails if any required runtime is missing. You can also package platform
 
 On Windows, use `gradlew.bat` instead of `./gradlew`. The supported `releasePlatform` values match the names above.
 
+To package standalone user-download archives for every available `packages/opencode/dist/opencode-*` target, run once after the builds are present:
+
+```bash
+cd packages/opencode
+bun run package:release
+```
+
+That creates:
+
+```text
+opencode-linux-*.tar.gz
+opencode-darwin-*.zip
+opencode-windows-*.zip
+```
+
 Upload the generated ZIPs and manifest to the same GitHub Release. macOS and Windows public releases should be code-signed before packaging; otherwise users may see operating-system security warnings.
 
 - **macOS:** build and sign both `opencode` and `opencode-speech` on the matching Intel or Apple Silicon machine, then notarize the public archive.
@@ -155,6 +178,33 @@ export JETBRAINS_PRIVATE_KEY_PASSWORD="your-password"
 8. Submit it for review.
 
 The GitHub runtime release must remain available while the plugin is under review so JetBrains can test installation.
+
+## 5a. Exact asset checklist for GitHub Release
+
+For a full release, upload all standalone CLI archives that exist in `packages/opencode/dist/`:
+
+```text
+opencode-linux-x64.tar.gz
+opencode-linux-arm64.tar.gz
+opencode-darwin-x64.zip
+opencode-darwin-arm64.zip
+opencode-windows-x64.zip
+opencode-windows-arm64.zip
+```
+
+Also upload all JetBrains runtime assets from `sdks/jetbrains/build/release/<version>/`:
+
+```text
+p4rth-opencode-linux-x64.zip
+p4rth-opencode-linux-arm64.zip
+p4rth-opencode-darwin-x64.zip
+p4rth-opencode-darwin-arm64.zip
+p4rth-opencode-windows-x64.zip
+p4rth-opencode-windows-arm64.zip
+p4rth-opencode-jetbrains-runtime.json
+```
+
+If a platform archive does not contain `opencode-speech` or `opencode-speech.exe`, the runtime still works, but local voice dictation is unavailable on that platform.
 
 ## 6. Later Marketplace updates
 
