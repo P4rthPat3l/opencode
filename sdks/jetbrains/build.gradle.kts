@@ -32,7 +32,7 @@ kotlin {
 
 intellijPlatform {
   pluginConfiguration {
-    id = "ai.opencode.p4rth.jetbrains"
+    id = "ai.opencode.plugin"
     name = providers.gradleProperty("pluginName")
     version = providers.gradleProperty("pluginVersion")
     description = "OpenCode for JetBrains IDEs using the p4rth-opencode managed runtime."
