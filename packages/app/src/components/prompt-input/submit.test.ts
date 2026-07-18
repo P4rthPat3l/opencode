@@ -23,6 +23,7 @@ const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
+const sentPromptParts: Array<Array<{ type: string; text?: string; synthetic?: boolean }>> = []
 
 let params: { id?: string } = {}
 let search: { draftId?: string } = {}
@@ -79,7 +80,10 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
+      promptAsync: async (input: { parts: Array<{ type: string; text?: string; synthetic?: boolean }> }) => {
+        sentPromptParts.push(input.parts)
+        return { data: undefined }
+      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -256,6 +260,7 @@ beforeEach(() => {
   optimisticSeeded.length = 0
   promoted.length = 0
   promotedDrafts.length = 0
+  sentPromptParts.length = 0
   params = {}
   search = {}
   sentShell.length = 0
@@ -264,6 +269,7 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  delete window.__P4RTH_OPENCODE_IDE__
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -427,6 +433,49 @@ describe("prompt submit worktree selection", () => {
         model: { providerID: "provider", modelID: "model", variant: "high" },
       },
     })
+  })
+
+  test("requests fresh IDE editor context for normal prompts", async () => {
+    params = { id: "session-1" }
+    window.__P4RTH_OPENCODE_IDE__ = {
+      version: 1,
+      getContext: async () => ({
+        projectRoot: "/repo/main",
+        activeFile: { relativePath: "src/a.ts", isActive: true },
+        openFiles: [
+          { relativePath: "src/a.ts", isActive: true },
+          { relativePath: "src/b.ts", isActive: false },
+        ],
+      }),
+    }
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sentPromptParts[0]).toContainEqual(
+      expect.objectContaining({
+        type: "text",
+        synthetic: true,
+        text: expect.stringContaining("Active file: src/a.ts"),
+      }),
+    )
+    expect(sentPromptParts[0]?.find((part) => part.synthetic)?.text).toContain("- src/b.ts")
   })
 
   test("uses an injected model selection", async () => {

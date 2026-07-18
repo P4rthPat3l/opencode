@@ -5,6 +5,7 @@ import { encodeFilePath } from "@/context/file/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 import { Identifier } from "@/utils/id"
 import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
+import { formatIdeEditorContext, type IdeContext } from "@/context/ide-host-context"
 
 type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
 
@@ -27,6 +28,7 @@ type BuildRequestPartsInput = {
   messageID: string
   sessionID: string
   sessionDirectory: string
+  ideContext?: IdeContext
 }
 
 const absolute = (directory: string, path: string) => {
@@ -96,6 +98,15 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
       text: input.text,
     },
   ]
+  const ideContext = formatIdeEditorContext(input.ideContext)
+  if (ideContext) {
+    requestParts.push({
+      id: Identifier.ascending("part"),
+      type: "text",
+      text: ideContext,
+      synthetic: true,
+    })
+  }
 
   const files = input.prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)

@@ -1,0 +1,25 @@
+<idea-plugin>
+  <depends>com.intellij.modules.platform</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationService serviceImplementation="ai.opencode.p4rth.jetbrains.runtime.OpenCodeApplicationService"/>
+    <applicationService serviceImplementation="ai.opencode.p4rth.jetbrains.settings.OpenCodeSettings"/>
+    <projectService serviceImplementation="ai.opencode.p4rth.jetbrains.project.OpenCodeProjectService"/>
+    <toolWindow id="OpenCode" anchor="right" factoryClass="ai.opencode.p4rth.jetbrains.ui.OpenCodeToolWindowFactory" canCloseContents="false"/>
+    <applicationConfigurable instance="ai.opencode.p4rth.jetbrains.settings.OpenCodeConfigurable" displayName="P4rth OpenCode" parentId="tools"/>
+  </extensions>
+
+  <projectListeners>
+    <listener class="ai.opencode.p4rth.jetbrains.ui.OpenCodeToolWindowListener"
+              topic="com.intellij.openapi.wm.ex.ToolWindowManagerListener"/>
+  </projectListeners>
+
+  <actions>
+    <action id="OpenCode.AddSelection" class="ai.opencode.p4rth.jetbrains.actions.AddSelectionToOpenCodeAction" text="Add Selection to OpenCode" description="Add the current editor selection to OpenCode without submitting a prompt">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift O"/>
+    </action>
+    <action id="OpenCode.AddCurrentFile" class="ai.opencode.p4rth.jetbrains.actions.AddCurrentFileToOpenCodeAction" text="Add Current File to OpenCode" description="Add the current file path to OpenCode"/>
+    <action id="OpenCode.AddOpenFiles" class="ai.opencode.p4rth.jetbrains.actions.AddOpenFilesToOpenCodeAction" text="Add Open Files to OpenCode" description="Add open file paths to OpenCode"/>
+  </actions>
+</idea-plugin>

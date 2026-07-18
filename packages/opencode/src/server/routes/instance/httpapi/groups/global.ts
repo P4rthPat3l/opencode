@@ -2,6 +2,7 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventManifest } from "@/event-manifest"
 import { InstanceDisposed } from "@/server/event"
+import { Product } from "@opencode-ai/core/product"
 import "@opencode-ai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
@@ -11,6 +12,18 @@ import { described } from "./metadata"
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,
+})
+
+const GlobalProduct = Schema.Struct({
+  product: Schema.Literal(Product.id),
+  runtimeVersion: Schema.String,
+  upstreamVersion: Schema.String,
+  protocolVersion: Schema.Literal(Product.protocolVersion),
+  webVersion: Schema.String,
+  runtimeChannel: Schema.Literal(Product.runtimeChannel),
+  jetbrainsBridgeVersion: Schema.Literal(Product.jetbrainsBridgeVersion),
+  storageSchemaVersion: Schema.Literal(Product.storageSchemaVersion),
+  capabilities: Schema.Array(Schema.String),
 })
 
 const SyncEventSchemas = EventManifest.Latest.values()
@@ -64,6 +77,7 @@ const GlobalUpgradeResult = Schema.Union([
 
 export const GlobalPaths = {
   health: "/global/health",
+  product: "/global/product",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
@@ -80,6 +94,15 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.health",
           summary: "Get health",
           description: "Get health information about the OpenCode server.",
+        }),
+      ),
+      HttpApiEndpoint.get("product", GlobalPaths.product, {
+        success: described(GlobalProduct, "Fork product and capability information"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.product",
+          summary: "Get product information",
+          description: "Get fork product identity and compatibility information for host integrations.",
         }),
       ),
       HttpApiEndpoint.get("event", GlobalPaths.event, {

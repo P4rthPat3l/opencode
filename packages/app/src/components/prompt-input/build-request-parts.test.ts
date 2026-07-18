@@ -393,4 +393,40 @@ describe("buildRequestParts", () => {
       expect(filePart.url).toContain("/..")
     }
   })
+
+  test("adds IDE editor state as synthetic text without attaching open files", () => {
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "what is open?", start: 0, end: 13 }],
+      context: [],
+      images: [],
+      text: "what is open?",
+      messageID: "msg_ide",
+      sessionID: "ses_ide",
+      sessionDirectory: "/project",
+      ideContext: {
+        projectRoot: "/project",
+        activeFile: { relativePath: "src/a.ts", isActive: true, caret: { line: 8, column: 2 } },
+        openFiles: [
+          { relativePath: "src/a.ts", isActive: true },
+          { relativePath: "src/b.ts", isActive: false },
+        ],
+      },
+    })
+
+    expect(result.requestParts.filter((part) => part.type === "file")).toHaveLength(0)
+    expect(result.requestParts).toContainEqual(
+      expect.objectContaining({
+        type: "text",
+        synthetic: true,
+        text: [
+          "IDE editor context:",
+          "Project root: /project",
+          "Active file: src/a.ts (line 8, column 2)",
+          "Open tabs (2):",
+          "- src/a.ts (active)",
+          "- src/b.ts",
+        ].join("\n"),
+      }),
+    )
+  })
 })

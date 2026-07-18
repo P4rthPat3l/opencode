@@ -28,3 +28,11 @@ export {
 } from "./wsl/types"
 export { ServerConnection } from "./context/server"
 export { handleNotificationClick } from "./utils/notification-click"
+export {
+  IDE_HOST_BRIDGE_VERSION,
+  type IdeContext,
+  type IdeFile,
+  type IdeHostBridge,
+  type IdeSelection,
+  type IdeWebBridge,
+} from "./context/ide-host"
