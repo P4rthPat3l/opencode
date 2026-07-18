@@ -102,7 +102,24 @@ cd sdks/jetbrains
 ./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0
 ```
 
-The task fails if any required runtime is missing. Upload the generated ZIPs and manifest to the same GitHub Release. macOS and Windows public releases should be code-signed before distribution; otherwise users may see operating-system security warnings.
+The task fails if any required runtime is missing. You can also package platforms one by one; existing ZIPs in the same version directory are preserved and the manifest is regenerated with every platform currently present:
+
+```bash
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=linux-x64
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=linux-arm64
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=darwin-x64
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=darwin-arm64
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=windows-x64
+./gradlew packageRuntimeRelease -PreleaseVersion=0.1.0 -PreleasePlatform=windows-arm64
+```
+
+On Windows, use `gradlew.bat` instead of `./gradlew`. The supported `releasePlatform` values match the names above.
+
+Upload the generated ZIPs and manifest to the same GitHub Release. macOS and Windows public releases should be code-signed before packaging; otherwise users may see operating-system security warnings.
+
+- **macOS:** build and sign both `opencode` and `opencode-speech` on the matching Intel or Apple Silicon machine, then notarize the public archive.
+- **Windows:** build and Authenticode-sign `opencode.exe` and `opencode-speech.exe` before packaging.
+- **Linux:** no paid platform signing is required.
 
 ## 4. Build and verify the JetBrains plugin
 

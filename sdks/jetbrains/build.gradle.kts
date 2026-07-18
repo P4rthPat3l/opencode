@@ -83,15 +83,15 @@ tasks.register("packageRuntimeRelease") {
       arrayOf("darwin-arm64", "opencode-darwin-arm64", "opencode", "p4rth-opencode"),
       arrayOf("windows-x64", "opencode-windows-x64", "opencode.exe", "p4rth-opencode.exe"),
       arrayOf("windows-arm64", "opencode-windows-arm64", "opencode.exe", "p4rth-opencode.exe"),
-    ).filter { releasePlatform == null || it[0] == releasePlatform }
-    require(targets.isNotEmpty()) { "Unsupported platform: $releasePlatform" }
+    )
+    val selectedTargets = targets.filter { releasePlatform == null || it[0] == releasePlatform }
+    require(selectedTargets.isNotEmpty()) { "Unsupported platform: $releasePlatform" }
 
     val destination = layout.buildDirectory.dir("release/$releaseVersion").get().asFile
-    destination.deleteRecursively()
+    if (releasePlatform == null) destination.deleteRecursively()
     destination.mkdirs()
-    val artifacts = linkedMapOf<String, Map<String, Any>>()
 
-    targets.forEach { target ->
+    selectedTargets.forEach { target ->
       val bin = root.resolve("packages/opencode/dist/${target[1]}/bin")
       val executable = bin.resolve(target[2])
       require(executable.isFile) { "Missing $executable. Build ${target[1]} before packaging." }
@@ -105,9 +105,17 @@ tasks.register("packageRuntimeRelease") {
         }
       }
       val sha256 = MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
+      logger.lifecycle("Packaged ${target[0]}: $sha256")
+    }
+
+    val artifacts = linkedMapOf<String, Map<String, Any>>()
+    targets.forEach { target ->
+      val filename = "p4rth-opencode-${target[0]}.zip"
+      val archive = destination.resolve(filename)
+      if (!archive.isFile) return@forEach
       artifacts[target[0]] = mapOf(
         "url" to "https://github.com/$releaseRepo/releases/download/v$releaseVersion/$filename",
-        "sha256" to sha256,
+        "sha256" to MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) },
         "size" to archive.length(),
       )
     }
