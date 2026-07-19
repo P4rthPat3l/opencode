@@ -1,5 +1,6 @@
 <idea-plugin>
   <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.vcs</depends>
 
   <extensions defaultExtensionNs="com.intellij">
     <applicationService serviceImplementation="ai.opencode.p4rth.jetbrains.runtime.OpenCodeApplicationService"/>
@@ -7,6 +8,7 @@
     <projectService serviceImplementation="ai.opencode.p4rth.jetbrains.project.OpenCodeProjectService"/>
     <toolWindow id="OpenCode" anchor="right" icon="/icons/opencodeToolWindow.svg" factoryClass="ai.opencode.p4rth.jetbrains.ui.OpenCodeToolWindowFactory" canCloseContents="false"/>
     <applicationConfigurable instance="ai.opencode.p4rth.jetbrains.settings.OpenCodeConfigurable" displayName="P4rth OpenCode" parentId="tools"/>
+    <notificationGroup id="P4rth OpenCode" displayType="BALLOON"/>
   </extensions>
 
   <projectListeners>
@@ -16,9 +18,12 @@
 
   <actions>
     <action id="OpenCode.ToggleToolWindow" class="ai.opencode.p4rth.jetbrains.actions.ToggleOpenCodeToolWindowAction" text="Toggle OpenCode" description="Show or hide the OpenCode chat panel">
-      <keyboard-shortcut keymap="$default" first-keystroke="ctrl ESCAPE"/>
-      <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ESCAPE" replace-all="true"/>
-      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ESCAPE" replace-all="true"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="alt MINUS"/>
+      <keyboard-shortcut keymap="Mac OS X" first-keystroke="alt MINUS" replace-all="true"/>
+      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="alt MINUS" replace-all="true"/>
+    </action>
+    <action id="OpenCode.GenerateCommitMessage" class="ai.opencode.p4rth.jetbrains.actions.GenerateCommitMessageAction" text="Generate Commit Message with OpenCode" description="Generate a commit message from the full staged diff using OpenCode" icon="/icons/opencodeAction.svg">
+      <add-to-group group-id="Vcs.MessageActionGroup" anchor="first"/>
     </action>
     <action id="OpenCode.AddSelection" class="ai.opencode.p4rth.jetbrains.actions.AddSelectionToOpenCodeAction" text="Add Selection to OpenCode" description="Add the current editor selection to OpenCode without submitting a prompt">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>

@@ -63,6 +63,65 @@ class OpenCodeApplicationService : Disposable {
   }
 
   /**
+   * Ensure a live sidecar on the current thread (for work already inside a background task),
+   * run [block] while holding a consumer refcount so idle shutdown cannot kill mid-request.
+   */
+  fun <T> withSidecar(project: Project, indicator: ProgressIndicator, block: (Sidecar) -> T): T {
+    val ready = ensureReady(project, indicator)
+    registerConsumer()
+    try {
+      return block(ready)
+    } finally {
+      unregisterConsumer()
+    }
+  }
+
+  private fun ensureReady(project: Project, indicator: ProgressIndicator): Sidecar {
+    while (true) {
+      sidecar?.takeIf { it.process.isAlive }?.let {
+        cancelIdleStop()
+        return it
+      }
+
+      val inFlight = synchronized(this) {
+        cancelIdleStop()
+        starting
+      }
+      if (inFlight != null) {
+        indicator.text = "Waiting for OpenCode…"
+        return inFlight.get()
+      }
+
+      // Start on this thread when no other prepare() is in flight. Mark `starting` so concurrent
+      // callers wait on the same future instead of launching a second process.
+      val future = CompletableFuture<Sidecar>()
+      val claimed = synchronized(this) {
+        if (sidecar?.process?.isAlive == true) return@synchronized false
+        if (starting != null) return@synchronized false
+        starting = future
+        true
+      }
+      if (!claimed) continue
+
+      try {
+        val settings = ApplicationManager.getApplication().getService(OpenCodeSettings::class.java).state
+        indicator.text = "Preparing OpenCode…"
+        val current = resolveAndStart(settings, project.basePath?.let { Path.of(it) }, indicator)
+        sidecar = current
+        future.complete(current)
+        return current
+      } catch (error: Throwable) {
+        future.completeExceptionally(error)
+        throw error
+      } finally {
+        synchronized(this) {
+          if (starting === future) starting = null
+        }
+      }
+    }
+  }
+
+  /**
    * Resolve a runtime and start the sidecar, preferring what the user already has:
    *
    * 1. Explicit external runtime path (user choice; no fallback — a bad path is a real error).
@@ -139,6 +198,35 @@ class OpenCodeApplicationService : Disposable {
   fun stopIfOwned() {
     val current = synchronized(this) { sidecar.also { sidecar = null } } ?: return
     runCatching { process.stop(current) }.onFailure { log.warn("Failed to stop OpenCode sidecar", it) }
+  }
+
+  /** Live managed sidecar if this process already started one (e.g. chat panel open). */
+  fun currentSidecar(): Sidecar? = sidecar?.takeIf { it.process.isAlive }
+
+  /**
+   * Models from the same catalog as the OpenCode web UI picker (`/config/providers`).
+   * Uses a running sidecar when available; otherwise starts one for [project].
+   * Must not be called on the EDT.
+   */
+  fun listModels(project: Project): List<SidecarHttpClient.ModelOption> {
+    val directory = project.basePath
+    val live = currentSidecar()
+    if (live != null) {
+      registerConsumer()
+      try {
+        return SidecarHttpClient(live).listModels(directory)
+      } finally {
+        unregisterConsumer()
+      }
+    }
+
+    val ready = prepare(project).get()
+    registerConsumer()
+    try {
+      return SidecarHttpClient(ready).listModels(directory)
+    } finally {
+      unregisterConsumer()
+    }
   }
 
   override fun dispose() {

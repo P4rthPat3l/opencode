@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- 16x16 toolbar icon: official mark geometry scaled from 512 -->
   <rect width="16" height="16" fill="#131010"/>
   <path d="M10 7v4H6V7h4Z" fill="#5A5858"/>
   <path fill-rule="evenodd" d="M12 13H4V3h8v10ZM10 5H6v6h4V5Z" fill="#FFFFFF"/>

@@ -105,10 +105,45 @@ The plugin sends project-relative paths, one-based line and column numbers, unsa
 
 | Action | Default shortcut | Mac |
 | --- | --- | --- |
-| Toggle OpenCode chat panel | `Ctrl+Esc` | `⌘Esc` |
+| Toggle OpenCode chat panel | `Alt+-` | `⌥-` |
 | Add Selection to OpenCode | `Ctrl+Shift+O` | `⌃⇧O` (default keymap) |
 
 Toggle behavior: if the panel is hidden or visible but not focused, the shortcut shows and focuses it; if it is already visible and focused, the shortcut hides it. Users can rebind these under **Settings → Keymap** (search for “OpenCode”).
+
+## AI commit messages
+
+The Commit tool window message toolbar includes **Generate Commit Message with OpenCode**.
+
+Behavior:
+
+1. Collects the **full** staged / included change set (no truncation): prefer Commit UI included changes, else `git diff --cached`, else the default changelist.
+2. Ensures the managed sidecar is running (does not require the chat Tool Window to be open).
+3. Creates an ephemeral session with tools denied, prompts with an explicit model, and writes the result into the commit message field.
+4. Deletes the ephemeral session afterward.
+
+### Model selection
+
+Under **Settings → Tools → P4rth OpenCode**, **AI model** is a dropdown of the same models as OpenCode chat (loaded from the sidecar). Use **Refresh list** after signing in.
+
+| Choice | What happens |
+| --- | --- |
+| **Use my usual OpenCode model** | Same default as the OpenCode app |
+| A specific model (e.g. DeepSeek Free — OpenCode Zen) | Always use that model for commit messages |
+
+Progress text shows which model is used. If no provider is set up, generation asks you to open OpenCode chat and sign in.
+
+### Other settings
+
+Under **Settings → Tools → P4rth OpenCode**:
+
+| Setting | Purpose |
+| --- | --- |
+| AI model | Which model writes commit messages (same list as chat) |
+| Writing style | Optional instructions; keep `{{diff}}` for the staged changes |
+| If the commit box already has text | Replace, only when empty, or append |
+| Advanced | Custom OpenCode path, update source, troubleshooting logs |
+
+The default writing style asks for a Conventional Commits subject + body. Large diffs can take a while; cancel from the progress dialog.
 
 ## Error recovery
 
