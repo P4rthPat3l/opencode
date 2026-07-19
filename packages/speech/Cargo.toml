@@ -7,7 +7,10 @@ publish = false
 
 [dependencies]
 hound = "3.5.1"
-miniaudio = { package = "om-fork-miniaudio", version = "0.12.2", default-features = false, features = ["ma-log-level-error", "ma-no-flac", "ma-no-mp3"] }
+# bindgen is required on aarch64 (and Windows) because om-fork-ep-miniaudio-sys only
+# ships pre-generated FFI bindings for a subset of targets (e.g. linux-x86_64).
+# default-features is false so we do not pull ma-debug / vorbis extras; re-enable bindgen explicitly.
+miniaudio = { package = "om-fork-miniaudio", version = "0.12.2", default-features = false, features = ["bindgen", "ma-log-level-error", "ma-no-flac", "ma-no-mp3"] }
 whisper-rs = "0.16.0"
 
 [profile.release]
