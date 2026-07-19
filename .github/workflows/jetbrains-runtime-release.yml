@@ -63,9 +63,8 @@ jobs:
           - host: windows-2025
             target: x86_64-pc-windows-msvc
             output: windows-x64
-          - host: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            output: windows-arm64
+          # windows-arm64 omitted: whisper.cpp ggml rejects MSVC on ARM and clang-cl
+          # CMake still fails on GHA windows-11-arm. Revisit when upstream supports it.
     runs-on: ${{ matrix.settings.host }}
     # Map secrets → env once so step `if:` can use env (secrets context is not allowed in step if).
     env:
@@ -96,10 +95,10 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           # whisper/miniaudio C builds need INCLUDE/LIB/PATH from Visual Studio.
-          arch: ${{ matrix.settings.output == 'windows-arm64' && 'arm64' || 'x64' }}
+          arch: x64
 
       # choco install llvm is flaky on GHA (extension upgrade failures). Use the action.
-      - name: Install Windows LLVM (libclang + clang-cl)
+      - name: Install Windows LLVM (libclang for bindgen)
         if: runner.os == 'Windows'
         uses: KyleMayes/install-llvm-action@v2
         with:
@@ -158,14 +157,6 @@ jobs:
           Remove-Item Env:WHISPER_DONT_GENERATE_BINDINGS -ErrorAction SilentlyContinue
           $env:CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
           $env:RUSTFLAGS = "$($env:RUSTFLAGS) -C target-feature=+crt-static".Trim()
-          if ("${{ matrix.settings.output }}" -eq "windows-arm64") {
-            $env:GGML_CPU_ARM_ARCH = "armv8-a"
-            $env:CC = "clang-cl"
-            $env:CXX = "clang-cl"
-            $env:CMAKE_GENERATOR = "Ninja"
-            $env:CMAKE_C_COMPILER = "clang-cl"
-            $env:CMAKE_CXX_COMPILER = "clang-cl"
-          }
           cargo build --release --locked --target ${{ matrix.settings.target }}
 
       - name: Build speech sidecar (Unix)
@@ -246,9 +237,7 @@ jobs:
           for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
             test -x "packages/opencode/speech-dist/$p/opencode-speech"
           done
-          for p in windows-x64 windows-arm64; do
-            test -f "packages/opencode/speech-dist/$p/opencode-speech.exe"
-          done
+          test -f "packages/opencode/speech-dist/windows-x64/opencode-speech.exe"
           find packages/opencode/speech-dist -type f | sort
 
       - name: Build JetBrains platform CLI binaries (with speech)
@@ -256,9 +245,9 @@ jobs:
           OPENCODE_VERSION: ${{ inputs.version }}
           OPENCODE_SPEECH_DIR: ${{ github.workspace }}/packages/opencode/speech-dist
         run: |
-          # Only the six plugin platforms — avoids requiring musl/baseline speech sidecars.
+          # Five supported plugin platforms (windows-arm64 not yet buildable with whisper.cpp).
           ./packages/opencode/script/build.ts \
-            --only=linux-x64,linux-arm64,darwin-x64,darwin-arm64,windows-x64,windows-arm64
+            --only=linux-x64,linux-arm64,darwin-x64,darwin-arm64,windows-x64
 
       - name: Verify JetBrains runtime targets include speech
         run: |
@@ -267,10 +256,8 @@ jobs:
             test -f "packages/opencode/dist/$target/bin/opencode"
             test -x "packages/opencode/dist/$target/bin/opencode-speech"
           done
-          for target in opencode-windows-x64 opencode-windows-arm64; do
-            test -f "packages/opencode/dist/$target/bin/opencode.exe"
-            test -f "packages/opencode/dist/$target/bin/opencode-speech.exe"
-          done
+          test -f "packages/opencode/dist/opencode-windows-x64/bin/opencode.exe"
+          test -f "packages/opencode/dist/opencode-windows-x64/bin/opencode-speech.exe"
 
       - name: Package standalone CLI archives
         working-directory: packages/opencode
@@ -279,9 +266,13 @@ jobs:
       - name: Package JetBrains managed runtimes + manifest
         working-directory: sdks/jetbrains
         run: |
-          ./gradlew --no-daemon packageRuntimeRelease \
-            -PreleaseVersion=${{ inputs.version }} \
-            -PreleaseRepo=${{ github.repository }}
+          # Package each built platform; regenerates the full manifest from present ZIPs.
+          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64; do
+            ./gradlew --no-daemon packageRuntimeRelease \
+              -PreleaseVersion=${{ inputs.version }} \
+              -PreleaseRepo=${{ github.repository }} \
+              -PreleasePlatform="$platform"
+          done
 
       - name: Inspect release tree
         run: |
