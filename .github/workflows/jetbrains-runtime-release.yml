@@ -98,13 +98,33 @@ jobs:
           # whisper/miniaudio C builds need INCLUDE/LIB/PATH from Visual Studio.
           arch: ${{ matrix.settings.output == 'windows-arm64' && 'arm64' || 'x64' }}
 
-      - name: Install Windows LLVM (libclang for bindgen + clang for win-arm64 ggml)
+      # choco install llvm is flaky on GHA (extension upgrade failures). Use the action.
+      - name: Install Windows LLVM (libclang + clang-cl)
         if: runner.os == 'Windows'
-        shell: bash
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18.1.8"
+
+      # Critical: Git for Windows ships usr\bin\link.exe (GNU coreutils), which rustc
+      # picks up instead of MSVC link.exe → "/usr/bin/link: extra operand".
+      - name: Prefer MSVC link.exe over Git usr/bin link
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          choco install llvm -y --no-progress
-          echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
-          echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
+          $parts = $env:PATH -split ';' | Where-Object {
+            $_ -and ($_ -notmatch '(?i)[\\/]Git[\\/]usr[\\/]bin')
+          }
+          $env:PATH = ($parts -join ';')
+          $msvcLink = (Get-Command link.exe -ErrorAction Stop).Source
+          Write-Host "link.exe resolves to: $msvcLink"
+          if ($msvcLink -match '(?i)Git[\\/]usr[\\/]bin') {
+            throw "MSVC link.exe not found on PATH (still seeing Git usr/bin link): $msvcLink"
+          }
+          "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($env:LLVM_PATH) {
+            $libclang = Join-Path $env:LLVM_PATH "bin"
+            "LIBCLANG_PATH=$libclang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -119,41 +139,48 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-      - name: Build speech sidecar
-        shell: bash
+      - name: Build speech sidecar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         working-directory: packages/speech
         env:
-          # Do NOT put bare /MT in CFLAGS/CXXFLAGS on Windows — CMake try_compile splits
-          # "C:/Program Files/..." and treats "Files/Git/MT" as a source file.
           GGML_NATIVE: "OFF"
           GGML_OPENMP: "OFF"
         run: |
+          $ErrorActionPreference = "Stop"
+          # Drop Git usr/bin so rustc never sees GNU link.exe
+          $env:PATH = (($env:PATH -split ";" | Where-Object { $_ -and ($_ -notmatch "(?i)[\\/]Git[\\/]usr[\\/]bin") }) -join ";")
+          Write-Host "link.exe => $((Get-Command link.exe).Source)"
+          if (((Get-Command link.exe).Source) -match "(?i)Git[\\/]usr[\\/]bin") {
+            throw "Still using Git usr/bin link.exe"
+          }
+          # Bundled whisper bindings are Linux-only; generate on Windows
+          Remove-Item Env:WHISPER_DONT_GENERATE_BINDINGS -ErrorAction SilentlyContinue
+          $env:CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
+          $env:RUSTFLAGS = "$($env:RUSTFLAGS) -C target-feature=+crt-static".Trim()
+          if ("${{ matrix.settings.output }}" -eq "windows-arm64") {
+            $env:GGML_CPU_ARM_ARCH = "armv8-a"
+            $env:CC = "clang-cl"
+            $env:CXX = "clang-cl"
+            $env:CMAKE_GENERATOR = "Ninja"
+            $env:CMAKE_C_COMPILER = "clang-cl"
+            $env:CMAKE_CXX_COMPILER = "clang-cl"
+          }
+          cargo build --release --locked --target ${{ matrix.settings.target }}
+
+      - name: Build speech sidecar (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: packages/speech
+        env:
+          GGML_NATIVE: "OFF"
+          GGML_OPENMP: "OFF"
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: |
           set -euo pipefail
-
-          # Bundled whisper-rs-sys bindings are Linux-layout and fail size checks on MSVC
-          # (E0080 on _G_fpos_t / _IO_FILE). Generate bindings on Windows; use bundled elsewhere.
-          if [[ "${{ runner.os }}" != "Windows" ]]; then
-            export WHISPER_DONT_GENERATE_BINDINGS=1
-          fi
-
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            export CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-            export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-          fi
-
-          if [[ "${{ matrix.settings.output }}" == "linux-arm64" || "${{ matrix.settings.output }}" == "darwin-arm64" || "${{ matrix.settings.output }}" == "windows-arm64" ]]; then
+          if [[ "${{ matrix.settings.output }}" == "linux-arm64" || "${{ matrix.settings.output }}" == "darwin-arm64" ]]; then
             export GGML_CPU_ARM_ARCH=armv8-a
           fi
-
-          # whisper.cpp ggml: "MSVC is not supported for ARM, use clang"
-          if [[ "${{ matrix.settings.output }}" == "windows-arm64" ]]; then
-            export CC=clang-cl
-            export CXX=clang-cl
-            export CMAKE_GENERATOR=Ninja
-            export CMAKE_C_COMPILER=clang-cl
-            export CMAKE_CXX_COMPILER=clang-cl
-          fi
-
           cargo build --release --locked --target ${{ matrix.settings.target }}
 
       - name: Sign macOS speech sidecar
