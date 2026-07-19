@@ -48,9 +48,7 @@ class OpenCodeApplicationService : Disposable {
           try {
             val settings = ApplicationManager.getApplication().getService(OpenCodeSettings::class.java).state
             indicator.text = "Preparing OpenCode…"
-            val executable = installer.resolveRuntime(settings.manifestUrl, settings.externalRuntimePath, indicator)
-            indicator.text = "Starting OpenCode…"
-            val current = process.start(executable, project.basePath?.let { Path.of(it) })
+            val current = resolveAndStart(settings, project.basePath?.let { Path.of(it) }, indicator)
             sidecar = current
             future.complete(current)
           } catch (error: Throwable) {
@@ -62,6 +60,45 @@ class OpenCodeApplicationService : Disposable {
       })
       return future
     }
+  }
+
+  /**
+   * Resolve a runtime and start the sidecar, preferring what the user already has:
+   *
+   * 1. Explicit external runtime path (user choice; no fallback — a bad path is a real error).
+   * 2. Auto-detected installed p4rth-opencode fork binaries (validated by the product handshake;
+   *    incompatible ones are skipped).
+   * 3. Managed runtime — reuse a prior download, otherwise download it.
+   *
+   * The managed download only runs when no installed fork works, so an installed fork is never
+   * re-downloaded. Detection never probes official OpenCode (branded name only), so this cannot
+   * launch or mutate official OpenCode.
+   */
+  private fun resolveAndStart(settings: OpenCodeSettings.State, workingDir: Path?, indicator: ProgressIndicator): Sidecar {
+    val external = settings.externalRuntimePath.trim()
+    if (external.isNotEmpty()) {
+      indicator.text = "Starting OpenCode…"
+      return process.start(Path.of(external), workingDir)
+    }
+    var lastError: Throwable? = null
+    for (candidate in installer.detectedRuntimes()) {
+      indicator.checkCanceled()
+      indicator.text = "Starting OpenCode…"
+      try {
+        return process.start(candidate, workingDir)
+      } catch (error: Throwable) {
+        lastError = error
+        log.info("Ignoring incompatible OpenCode runtime at $candidate: ${error.message}")
+      }
+    }
+    indicator.text = "Preparing OpenCode runtime…"
+    val managed = try {
+      installer.resolveManagedRuntime(settings.manifestUrl, indicator)
+    } catch (error: Throwable) {
+      throw lastError ?: error
+    }
+    indicator.text = "Starting OpenCode…"
+    return process.start(managed, workingDir)
   }
 
   /** A live browser is attached. Keeps the sidecar running. */

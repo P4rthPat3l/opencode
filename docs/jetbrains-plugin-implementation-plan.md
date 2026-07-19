@@ -165,6 +165,19 @@ Behavior:
 
 This is the only happy path for the first stable release.
 
+### 4.1.1 Installed fork auto-detection
+
+Runs automatically before the managed download, all platforms.
+
+Behavior:
+
+- Before downloading, the plugin looks for an already-installed `p4rth-opencode` fork binary on the host (every `PATH` directory plus common per-user and system install locations).
+- Only the branded `p4rth-opencode` name is probed. Official OpenCode is named `opencode` and is never probed, so detection can never launch or mutate official OpenCode.
+- Each detected binary is validated through `/global/product` before use; incompatible ones are skipped.
+- The managed download runs only when no installed fork validates, so an installed fork is never re-downloaded.
+- The detected binary resolves the shared fork profile from its own branded defaults, so terminal and IDE keep one profile.
+- Resolution order: explicit external path → detected installed fork → managed runtime (reuse prior download, else download).
+
 ### 4.2 External fork runtime
 
 Advanced mode.

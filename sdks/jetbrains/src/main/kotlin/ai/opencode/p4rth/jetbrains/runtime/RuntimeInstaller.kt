@@ -24,8 +24,11 @@ class RuntimeInstaller(private val paths: RuntimePaths) {
   private val client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()
   private val maxArtifactBytes = 350L * 1024L * 1024L
 
-  fun resolveRuntime(settingsManifestUrl: String, externalRuntimePath: String, indicator: ProgressIndicator): Path {
-    if (externalRuntimePath.isNotBlank()) return Path.of(externalRuntimePath)
+  /** Branded fork binaries already installed on the host. Validated by the sidecar handshake before use. */
+  fun detectedRuntimes(): List<Path> = RuntimeDetector.detect()
+
+  /** Reuse a previously downloaded managed runtime, otherwise download it. */
+  fun resolveManagedRuntime(settingsManifestUrl: String, indicator: ProgressIndicator): Path {
     val platform = PlatformDetector.current() ?: error("Unsupported operating system or CPU architecture")
     val active = paths.activeFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }?.let { Path.of(it) }
     if (active != null && active.exists()) return active

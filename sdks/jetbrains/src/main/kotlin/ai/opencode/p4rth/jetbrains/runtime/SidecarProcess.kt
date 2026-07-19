@@ -41,14 +41,21 @@ class SidecarProcess(private val paths: RuntimePaths) {
       .apply { workingDirectory?.takeIf { Files.isDirectory(it) }?.let { directory(it.toFile()) } }
       .apply { environment().putAll(env) }
       .start()
-    drain(process.inputReader(), false)
-    drain(process.errorReader(), true)
-    val url = "http://127.0.0.1:$port"
-    waitForHealth(process, url, password)
-    val product = fetchProduct(url, password)
-    val validation = ProductValidator.validate(product)
-    require(validation.accepted) { validation.reason ?: "Runtime is incompatible" }
-    return Sidecar(process, url, "opencode", password, product)
+    try {
+      drain(process.inputReader(), false)
+      drain(process.errorReader(), true)
+      val url = "http://127.0.0.1:$port"
+      waitForHealth(process, url, password)
+      val product = fetchProduct(url, password)
+      val validation = ProductValidator.validate(product)
+      require(validation.accepted) { validation.reason ?: "Runtime is incompatible" }
+      return Sidecar(process, url, "opencode", password, product)
+    } catch (error: Throwable) {
+      // Never leak a started process when startup or validation fails: a rejected candidate must
+      // die before the caller tries the next runtime.
+      runCatching { process.destroyForcibly() }
+      throw error
+    }
   }
 
   fun stop(sidecar: Sidecar) {
