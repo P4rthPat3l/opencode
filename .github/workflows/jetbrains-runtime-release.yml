@@ -16,6 +16,13 @@ on:
         description: "Release version (e.g. 2.0.1). Tag will be v<version>."
         required: true
         type: string
+      # Independent of "Use workflow from". Default branch (dev) holds the YAML so the
+      # Run workflow button appears; product + packages/speech live on jetbrains.
+      build_ref:
+        description: "Git branch/tag/SHA to build (must include packages/speech)"
+        required: true
+        type: string
+        default: jetbrains
       create_release:
         description: "Create/update the GitHub Release and upload assets"
         required: false
@@ -65,12 +72,31 @@ jobs:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_ref }}
+
+      - name: Require packages/speech
+        shell: bash
+        run: |
+          if [[ ! -d packages/speech ]]; then
+            echo "::error::packages/speech is missing on ref '${{ inputs.build_ref }}'."
+            echo "Set build_ref=jetbrains (default). Do not build plain 'dev'."
+            ls -la packages || true
+            exit 1
+          fi
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang cmake ninja-build
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build libclang-dev
+
+      - name: Install Windows build dependencies (libclang for bindgen)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install llvm -y --no-progress
+          echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -89,8 +115,10 @@ jobs:
         shell: bash
         working-directory: packages/speech
         env:
-          CFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
-          CXXFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          # Do NOT put bare /MT in CFLAGS/CXXFLAGS on Windows — CMake try_compile splits
+          # "C:/Program Files/..." and treats "Files/Git/MT" as a source file.
+          # Static CRT is requested via RUSTFLAGS + CMAKE_MSVC_RUNTIME_LIBRARY instead.
+          CMAKE_MSVC_RUNTIME_LIBRARY: ${{ runner.os == 'Windows' && 'MultiThreaded' || '' }}
           GGML_CPU_ARM_ARCH: ${{ startsWith(matrix.settings.target, 'aarch64') && 'armv8-a' || '' }}
           GGML_NATIVE: "OFF"
           GGML_OPENMP: "OFF"
@@ -134,6 +162,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_ref }}
+
+      - name: Require packages/speech
+        run: test -d packages/speech
 
       - uses: ./.github/actions/setup-bun
 
