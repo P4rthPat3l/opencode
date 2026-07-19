@@ -1,0 +1,274 @@
+# Build p4rth-opencode + opencode-speech for every JetBrains target platform,
+# package managed-runtime ZIPs + manifest, and publish a GitHub Release.
+#
+# Trigger: Actions → "JetBrains runtime release" → Run workflow
+# Inputs: version (required), create_release (default true)
+#
+# Uses free GitHub-hosted runners only (no Blacksmith / paid runners).
+# Optional Apple/Windows code signing runs only when the matching secrets exist.
+
+name: JetBrains runtime release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 2.0.1). Tag will be v<version>."
+        required: true
+        type: string
+      create_release:
+        description: "Create/update the GitHub Release and upload assets"
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: "Create the release as a draft"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: jetbrains-runtime-release-${{ inputs.version }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-speech:
+    name: speech (${{ matrix.settings.output }})
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            output: linux-x64
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            output: linux-arm64
+          - host: macos-15
+            target: aarch64-apple-darwin
+            output: darwin-arm64
+          - host: macos-15-intel
+            target: x86_64-apple-darwin
+            output: darwin-x64
+          - host: windows-2025
+            target: x86_64-pc-windows-msvc
+            output: windows-x64
+          - host: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            output: windows-arm64
+    runs-on: ${{ matrix.settings.host }}
+    # Map secrets → env once so step `if:` can use env (secrets context is not allowed in step if).
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          keychain: build
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Build speech sidecar
+        shell: bash
+        working-directory: packages/speech
+        env:
+          CFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          CXXFLAGS: ${{ runner.os == 'Windows' && '/MT' || '' }}
+          GGML_CPU_ARM_ARCH: ${{ startsWith(matrix.settings.target, 'aarch64') && 'armv8-a' || '' }}
+          GGML_NATIVE: "OFF"
+          GGML_OPENMP: "OFF"
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: cargo build --release --locked --target ${{ matrix.settings.target }}
+
+      - name: Sign macOS speech sidecar
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
+        shell: bash
+        run: |
+          identity=$(security find-identity -v -p codesigning | awk -F '"' '/Developer ID Application/ {print $2; exit}')
+          test -n "$identity"
+          codesign --force --options runtime --timestamp --sign "$identity" \
+            "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech"
+          codesign --verify --strict --verbose=2 \
+            "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech"
+
+      - name: Stage speech sidecar
+        shell: bash
+        run: |
+          mkdir -p "packages/speech/dist/${{ matrix.settings.output }}"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech.exe" \
+              "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech.exe"
+          else
+            cp "packages/speech/target/${{ matrix.settings.target }}/release/opencode-speech" \
+              "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech"
+            chmod 755 "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencode-speech-${{ matrix.settings.output }}
+          path: packages/speech/dist/${{ matrix.settings.output }}
+          if-no-files-found: error
+
+  build-cli:
+    name: build CLI + package runtimes
+    needs: build-speech
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download speech sidecars
+        uses: actions/download-artifact@v4
+        with:
+          pattern: opencode-speech-*
+          path: packages/opencode/speech-dist
+          merge-multiple: true
+
+      - name: Verify speech layout
+        run: |
+          set -euo pipefail
+          for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            test -x "packages/opencode/speech-dist/$p/opencode-speech"
+          done
+          for p in windows-x64 windows-arm64; do
+            test -f "packages/opencode/speech-dist/$p/opencode-speech.exe"
+          done
+          find packages/opencode/speech-dist -type f | sort
+
+      - name: Build JetBrains platform CLI binaries (with speech)
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_SPEECH_DIR: ${{ github.workspace }}/packages/opencode/speech-dist
+        run: |
+          # Only the six plugin platforms — avoids requiring musl/baseline speech sidecars.
+          ./packages/opencode/script/build.ts \
+            --only=linux-x64,linux-arm64,darwin-x64,darwin-arm64,windows-x64,windows-arm64
+
+      - name: Verify JetBrains runtime targets include speech
+        run: |
+          set -euo pipefail
+          for target in opencode-linux-x64 opencode-linux-arm64 opencode-darwin-x64 opencode-darwin-arm64; do
+            test -f "packages/opencode/dist/$target/bin/opencode"
+            test -x "packages/opencode/dist/$target/bin/opencode-speech"
+          done
+          for target in opencode-windows-x64 opencode-windows-arm64; do
+            test -f "packages/opencode/dist/$target/bin/opencode.exe"
+            test -f "packages/opencode/dist/$target/bin/opencode-speech.exe"
+          done
+
+      - name: Package standalone CLI archives
+        working-directory: packages/opencode
+        run: bun run package:release
+
+      - name: Package JetBrains managed runtimes + manifest
+        working-directory: sdks/jetbrains
+        run: |
+          ./gradlew --no-daemon packageRuntimeRelease \
+            -PreleaseVersion=${{ inputs.version }} \
+            -PreleaseRepo=${{ github.repository }}
+
+      - name: Inspect release tree
+        run: |
+          set -euo pipefail
+          ls -la "sdks/jetbrains/build/release/${{ inputs.version }}"
+          for z in sdks/jetbrains/build/release/${{ inputs.version }}/p4rth-opencode-*.zip; do
+            echo "=== $z ==="
+            unzip -l "$z" | head -20
+          done
+          cat "sdks/jetbrains/build/release/${{ inputs.version }}/p4rth-opencode-jetbrains-runtime.json"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetbrains-runtime-${{ inputs.version }}
+          path: |
+            sdks/jetbrains/build/release/${{ inputs.version }}/
+            packages/opencode/dist/*.tar.gz
+            packages/opencode/dist/*.zip
+          if-no-files-found: error
+
+  publish-release:
+    name: publish GitHub Release
+    needs: build-cli
+    if: inputs.create_release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          name: jetbrains-runtime-${{ inputs.version }}
+          path: release-assets
+
+      - name: Flatten asset paths
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # JetBrains ZIPs + manifest
+          find release-assets -type f \( -name 'p4rth-opencode-*.zip' -o -name 'p4rth-opencode-jetbrains-runtime.json' \) -exec cp -v {} upload/ \;
+          # Standalone CLI archives (optional user downloads)
+          find release-assets -type f \( -name 'opencode-linux-*.tar.gz' -o -name 'opencode-darwin-*.zip' -o -name 'opencode-windows-*.zip' \) -exec cp -v {} upload/ \;
+          ls -lah upload
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: P4rth OpenCode ${{ inputs.version }}
+          draft: ${{ inputs.draft }}
+          generate_release_notes: true
+          body: |
+            ## JetBrains managed runtime ${{ inputs.version }}
+
+            This release ships **`p4rth-opencode` + `opencode-speech`** for every plugin platform so local voice dictation works.
+
+            ### Plugin install source
+            ```
+            https://github.com/${{ github.repository }}/releases/latest/download/p4rth-opencode-jetbrains-runtime.json
+            ```
+
+            ### Platforms
+            - `p4rth-opencode-linux-x64.zip`
+            - `p4rth-opencode-linux-arm64.zip`
+            - `p4rth-opencode-darwin-x64.zip`
+            - `p4rth-opencode-darwin-arm64.zip`
+            - `p4rth-opencode-windows-x64.zip`
+            - `p4rth-opencode-windows-arm64.zip`
+
+            Each ZIP root contains `p4rth-opencode` (or `.exe`) **and** `opencode-speech` (or `.exe`).
+
+            After updating, clear a stale managed install if the plugin keeps the old binary:
+            ```
+            # Linux / macOS example
+            rm -rf ~/.cache/JetBrains/*/p4rth-opencode
+            ```
+            Then reopen the OpenCode tool window so the plugin re-downloads from this release.
+          files: upload/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
