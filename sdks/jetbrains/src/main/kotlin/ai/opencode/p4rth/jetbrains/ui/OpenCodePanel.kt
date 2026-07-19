@@ -27,6 +27,10 @@ import org.cef.callback.CefMediaAccessCallback.MediaPermissionFlags
 import org.cef.handler.CefLoadHandlerAdapter
 import org.cef.handler.CefPermissionHandler
 import org.cef.handler.CefRequestHandlerAdapter
+import org.cef.handler.CefResourceRequestHandler
+import org.cef.handler.CefResourceRequestHandlerAdapter
+import org.cef.misc.BoolRef
+import org.cef.network.CefRequest
 import java.awt.BorderLayout
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -127,6 +131,17 @@ class OpenCodePanel(private val project: Project) : Disposable {
     val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
     this.query = query
     val sidecarUri = URI.create(url)
+    // Inject Basic Auth on every request to the loopback sidecar so the server never returns 401.
+    // Relying on CefRequestHandler.getAuthCredentials is not enough: CEF only reliably invokes it
+    // for proxy auth, so a server auth challenge on the top-level load shows the native login dialog.
+    val authHeader = "Basic " + Base64.getEncoder()
+      .encodeToString("$username:$password".toByteArray(StandardCharsets.UTF_8))
+    val sidecarResourceHandler = object : CefResourceRequestHandlerAdapter() {
+      override fun onBeforeResourceLoad(cefBrowser: CefBrowser?, frame: CefFrame?, request: CefRequest): Boolean {
+        request.setHeaderByName("Authorization", authHeader, true)
+        return false
+      }
+    }
     query.addHandler { message ->
       if (message == "ready") {
         ready = true
@@ -141,6 +156,18 @@ class OpenCodePanel(private val project: Project) : Disposable {
       )
     }
     browser.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
+      override fun getResourceRequestHandler(
+        cefBrowser: CefBrowser?,
+        frame: CefFrame?,
+        request: CefRequest,
+        isNavigation: Boolean,
+        isDownload: Boolean,
+        requestInitiator: String?,
+        disableDefaultHandling: BoolRef?,
+      ): CefResourceRequestHandler? {
+        return if (request.url.startsWith(url)) sidecarResourceHandler else null
+      }
+
       override fun getAuthCredentials(
         cefBrowser: CefBrowser,
         originUrl: String,
