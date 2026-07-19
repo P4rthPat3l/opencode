@@ -60,6 +60,9 @@ jobs:
             target: aarch64-pc-windows-msvc
             output: windows-arm64
     runs-on: ${{ matrix.settings.host }}
+    # Map secrets → env once so step `if:` can use env (secrets context is not allowed in step if).
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +78,7 @@ jobs:
           targets: ${{ matrix.settings.target }}
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
         uses: apple-actions/import-codesign-certs@v3
         with:
           keychain: build
@@ -96,7 +99,7 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.settings.target }}
 
       - name: Sign macOS speech sidecar
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
         shell: bash
         run: |
           identity=$(security find-identity -v -p codesigning | awk -F '"' '/Developer ID Application/ {print $2; exit}')
