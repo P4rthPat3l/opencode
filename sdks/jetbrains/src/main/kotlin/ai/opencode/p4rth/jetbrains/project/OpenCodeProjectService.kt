@@ -48,7 +48,9 @@ class OpenCodeProjectService(private val project: Project) : Disposable {
   }
 
   private fun addContext(context: IdeContext) {
-    ToolWindowManager.getInstance(project).getToolWindow("OpenCode")?.show {
+    val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("OpenCode") ?: return
+    // Show (and focus) so ToolWindowFactory can attach the panel on first use, then deliver.
+    toolWindow.show {
       panel?.addContext(context)
     }
   }

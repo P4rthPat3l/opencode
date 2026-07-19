@@ -37,6 +37,31 @@ describe("IDE host bridge", () => {
     ])
   })
 
+  test("labels non-truncated selections so v2 prompt chips stay visible", () => {
+    expect(
+      ideContextToContextItems({
+        activeFile: {
+          relativePath: "src/plain.txt",
+          selection: {
+            startLine: 1,
+            startColumn: 1,
+            endLine: 2,
+            endColumn: 1,
+            text: "hello",
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        type: "file",
+        path: "src/plain.txt",
+        selection: { startLine: 1, startChar: 1, endLine: 2, endChar: 1 },
+        preview: "hello",
+        comment: "selection from IDE",
+      },
+    ])
+  })
+
   test("adds open file metadata without file contents", () => {
     expect(
       ideContextToContextItems({

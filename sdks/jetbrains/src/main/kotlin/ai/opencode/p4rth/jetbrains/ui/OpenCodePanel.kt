@@ -31,6 +31,7 @@ import org.cef.handler.CefResourceRequestHandler
 import org.cef.handler.CefResourceRequestHandlerAdapter
 import org.cef.misc.BoolRef
 import org.cef.network.CefRequest
+import org.cef.network.CefRequest.TransitionType
 import java.awt.BorderLayout
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -59,14 +60,37 @@ class OpenCodePanel(private val project: Project) : Disposable {
   }
 
   fun addContext(context: IdeContext) {
-    if (!ready) {
+    // Always buffer until the web host bridge has called notifyReady. Delivering earlier is a
+    // silent no-op when window.__P4RTH_OPENCODE_IDE_HOST__ is not mounted yet.
+    if (!ready || browser == null) {
       pending += context
       prepare()
       return
     }
+    deliverContext(context)
+  }
+
+  /**
+   * Push context into the embedded page. Retries briefly if the web bridge is mid-remount
+   * (SPA route change), so a selection is not lost during a short gap after notifyReady.
+   */
+  private fun deliverContext(context: IdeContext) {
     val payload = gson.toJson(context)
+    val web = ProductIdentity.webObject
     browser?.cefBrowser?.executeJavaScript(
-      "window.${ProductIdentity.webObject}?.addContext($payload)",
+      """
+      (function(ctx) {
+        function attempt(n) {
+          var host = window.$web;
+          if (host && typeof host.addContext === 'function') {
+            host.addContext(ctx);
+            return;
+          }
+          if (n < 40) setTimeout(function() { attempt(n + 1); }, 50);
+        }
+        attempt(0);
+      })($payload);
+      """.trimIndent(),
       browser?.cefBrowser?.url,
       0,
     )
@@ -147,7 +171,8 @@ class OpenCodePanel(private val project: Project) : Disposable {
         ready = true
         val items = pending.toList()
         pending.clear()
-        items.forEach(::addContext)
+        // deliverContext (not addContext) so we do not re-queue if ready flips mid-flush.
+        items.forEach(::deliverContext)
         return@addHandler JBCefJSQuery.Response("")
       }
       runCatching { handleBridgeMessage(message).orEmpty() }.fold(
@@ -233,6 +258,12 @@ class OpenCodePanel(private val project: Project) : Disposable {
       }
     }, browser.cefBrowser)
     browser.jbCefClient.addLoadHandler(object : CefLoadHandlerAdapter() {
+      override fun onLoadStart(cefBrowser: CefBrowser, frame: CefFrame, transitionType: TransitionType) {
+        // Full navigations tear down the web host bridge. Until it remounts and notifyReady
+        // runs again, queue context instead of executeJavaScript against a missing object.
+        if (frame.isMain) ready = false
+      }
+
       override fun onLoadEnd(cefBrowser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
         if (frame.isMain) injectBridge(browser, query, url)
       }
@@ -250,6 +281,10 @@ class OpenCodePanel(private val project: Project) : Disposable {
   }
 
   private fun injectBridge(browser: JBCefBrowser, query: JBCefJSQuery, url: String) {
+    // injectBridge runs on onLoadEnd, which is typically *after* deferred SPA modules have
+    // already mounted IdeHostPromptBridge and called notifyReady once. If that first call
+    // happened before this object existed, ready stayed false and Add Selection queued forever.
+    // After installing the host object, re-signal ready when the web bridge is already present.
     browser.cefBrowser.executeJavaScript(
       """
       window.${ProductIdentity.bridgeObject} = {
@@ -267,6 +302,9 @@ class OpenCodePanel(private val project: Project) : Disposable {
           });
         }
       };
+      if (window.${ProductIdentity.webObject}) {
+        window.${ProductIdentity.bridgeObject}.notifyReady();
+      }
       """.trimIndent(),
       url,
       0,

@@ -62,9 +62,31 @@ export function IdeHostPromptBridge() {
       },
     }
     window.__P4RTH_OPENCODE_IDE_HOST__ = bridge
-    window.__P4RTH_OPENCODE_IDE__?.notifyReady?.()
+
+    // JetBrains injects window.__P4RTH_OPENCODE_IDE__ on onLoadEnd, which often runs *after*
+    // this effect's first pass (deferred SPA modules mount first). Retry until the host object
+    // appears so pending "Add Selection" payloads can flush. Stop once notified or after ~5s.
+    let notified = false
+    const tryNotify = () => {
+      if (notified) return true
+      const host = window.__P4RTH_OPENCODE_IDE__
+      if (!host?.notifyReady) return false
+      host.notifyReady()
+      notified = true
+      return true
+    }
+    tryNotify()
+    const timer =
+      typeof window !== "undefined"
+        ? window.setInterval(() => {
+            if (tryNotify()) window.clearInterval(timer)
+          }, 100)
+        : undefined
+    const stop = typeof window !== "undefined" ? window.setTimeout(() => window.clearInterval(timer), 5_000) : undefined
 
     onCleanup(() => {
+      if (timer !== undefined) window.clearInterval(timer)
+      if (stop !== undefined) window.clearTimeout(stop)
       if (window.__P4RTH_OPENCODE_IDE_HOST__ === bridge) delete window.__P4RTH_OPENCODE_IDE_HOST__
     })
   })

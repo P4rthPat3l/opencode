@@ -123,7 +123,9 @@ function commentForFile(file: IdeFile) {
   const parts = [
     file.languageId,
     file.isModified ? "modified in IDE" : undefined,
-    file.selection?.truncated ? "selection truncated" : undefined,
+    file.selection ? (file.selection.truncated ? "selection truncated" : "selection from IDE") : undefined,
   ].filter((part): part is string => !!part)
+  // Always return a non-empty comment for selections so v2 prompt UI (which only
+  // renders context items that have comments) shows the chip.
   return parts.join(" · ") || undefined
 }
