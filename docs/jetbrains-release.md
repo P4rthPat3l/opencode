@@ -8,13 +8,13 @@ Workflow: [`.github/workflows/jetbrains-runtime-release.yml`](../.github/workflo
 
 ### What it does
 
-1. Builds `opencode-speech` natively on 6 runners:
+1. Builds `opencode-speech` natively on 5 runners:
    - `linux-x64` → `ubuntu-24.04`
    - `linux-arm64` → `ubuntu-24.04-arm`
    - `darwin-arm64` → `macos-15`
    - `darwin-x64` → `macos-15-intel`
    - `windows-x64` → `windows-2025`
-   - `windows-arm64` → `windows-11-arm`
+   - `windows-arm64` is **not** built yet (whisper.cpp ggml does not support MSVC on ARM)
 2. Cross-compiles the OpenCode CLI for those 6 platforms with speech copied into each `bin/`
 3. Runs `packageRuntimeRelease` → `p4rth-opencode-*.zip` + `p4rth-opencode-jetbrains-runtime.json`
 4. Creates/updates GitHub Release `v<version>` with all assets
