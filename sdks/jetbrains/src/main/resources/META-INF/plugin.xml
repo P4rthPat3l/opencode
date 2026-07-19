@@ -15,6 +15,11 @@
   </projectListeners>
 
   <actions>
+    <action id="OpenCode.ToggleToolWindow" class="ai.opencode.p4rth.jetbrains.actions.ToggleOpenCodeToolWindowAction" text="Toggle OpenCode" description="Show or hide the OpenCode chat panel">
+      <keyboard-shortcut keymap="$default" first-keystroke="ctrl ESCAPE"/>
+      <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ESCAPE" replace-all="true"/>
+      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ESCAPE" replace-all="true"/>
+    </action>
     <action id="OpenCode.AddSelection" class="ai.opencode.p4rth.jetbrains.actions.AddSelectionToOpenCodeAction" text="Add Selection to OpenCode" description="Add the current editor selection to OpenCode without submitting a prompt">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift O"/>

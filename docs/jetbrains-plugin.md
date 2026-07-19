@@ -101,6 +101,15 @@ Normal browser and desktop usage works when these globals are absent.
 
 The plugin sends project-relative paths, one-based line and column numbers, unsaved selected text for explicit selection actions, and open-file metadata without file contents. Selected text is capped at 80 KB and marked as truncated.
 
+## Keyboard shortcuts
+
+| Action | Default shortcut | Mac |
+| --- | --- | --- |
+| Toggle OpenCode chat panel | `Ctrl+Esc` | `⌘Esc` |
+| Add Selection to OpenCode | `Ctrl+Shift+O` | `⌃⇧O` (default keymap) |
+
+Toggle behavior: if the panel is hidden or visible but not focused, the shortcut shows and focuses it; if it is already visible and focused, the shortcut hides it. Users can rebind these under **Settings → Keymap** (search for “OpenCode”).
+
 ## Error recovery
 
 Tool Window startup shows inline status and a retry button on failure. JCEF-unavailable fallback shows the local server URL.

@@ -37,6 +37,16 @@ class OpenCodeProjectService(private val project: Project) : Disposable {
   fun context(includeSelection: Boolean, includeOpenFiles: Boolean, includeCaret: Boolean) =
     contextProvider.context(includeSelection, includeOpenFiles, includeCaret)
 
+  /** Show and focus the chat panel, or hide it when it is already visible and active. */
+  fun toggleToolWindow() {
+    val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("OpenCode") ?: return
+    if (toolWindow.isVisible && toolWindow.isActive) {
+      toolWindow.hide()
+      return
+    }
+    toolWindow.activate(null)
+  }
+
   private fun addContext(context: IdeContext) {
     ToolWindowManager.getInstance(project).getToolWindow("OpenCode")?.show {
       panel?.addContext(context)
