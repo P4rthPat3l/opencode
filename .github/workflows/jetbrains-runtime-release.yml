@@ -198,10 +198,12 @@ jobs:
             chmod 755 "packages/speech/dist/${{ matrix.settings.output }}/opencode-speech"
           fi
 
+      # Upload the platform directory itself so merge-multiple keeps
+      # speech-dist/<platform>/opencode-speech (not a flat overwrite of one binary).
       - uses: actions/upload-artifact@v4
         with:
           name: opencode-speech-${{ matrix.settings.output }}
-          path: packages/speech/dist/${{ matrix.settings.output }}
+          path: packages/speech/dist
           if-no-files-found: error
 
   build-cli:
@@ -234,10 +236,23 @@ jobs:
       - name: Verify speech layout
         run: |
           set -euo pipefail
+          echo "Downloaded tree:"
+          find packages/opencode/speech-dist -type f | sort || true
           for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-            test -x "packages/opencode/speech-dist/$p/opencode-speech"
+            f="packages/opencode/speech-dist/$p/opencode-speech"
+            if [[ ! -f "$f" ]]; then
+              echo "::error::Missing $f"
+              exit 1
+            fi
+            # Artifact download may drop the executable bit on Linux runners.
+            chmod +x "$f"
+            test -x "$f"
           done
-          test -f "packages/opencode/speech-dist/windows-x64/opencode-speech.exe"
+          win="packages/opencode/speech-dist/windows-x64/opencode-speech.exe"
+          if [[ ! -f "$win" ]]; then
+            echo "::error::Missing $win"
+            exit 1
+          fi
           find packages/opencode/speech-dist -type f | sort
 
       - name: Build JetBrains platform CLI binaries (with speech)
