@@ -91,12 +91,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang cmake ninja-build libclang-dev
 
-      - name: Install Windows build dependencies (libclang for bindgen)
+      - name: Setup MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          # whisper/miniaudio C builds need INCLUDE/LIB/PATH from Visual Studio.
+          arch: ${{ matrix.settings.output == 'windows-arm64' && 'arm64' || 'x64' }}
+
+      - name: Install Windows LLVM (libclang for bindgen + clang for win-arm64 ggml)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           choco install llvm -y --no-progress
           echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
+          echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -117,14 +125,36 @@ jobs:
         env:
           # Do NOT put bare /MT in CFLAGS/CXXFLAGS on Windows — CMake try_compile splits
           # "C:/Program Files/..." and treats "Files/Git/MT" as a source file.
-          # Static CRT is requested via RUSTFLAGS + CMAKE_MSVC_RUNTIME_LIBRARY instead.
-          CMAKE_MSVC_RUNTIME_LIBRARY: ${{ runner.os == 'Windows' && 'MultiThreaded' || '' }}
-          GGML_CPU_ARM_ARCH: ${{ startsWith(matrix.settings.target, 'aarch64') && 'armv8-a' || '' }}
           GGML_NATIVE: "OFF"
           GGML_OPENMP: "OFF"
-          WHISPER_DONT_GENERATE_BINDINGS: "1"
-          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
-        run: cargo build --release --locked --target ${{ matrix.settings.target }}
+        run: |
+          set -euo pipefail
+
+          # Bundled whisper-rs-sys bindings are Linux-layout and fail size checks on MSVC
+          # (E0080 on _G_fpos_t / _IO_FILE). Generate bindings on Windows; use bundled elsewhere.
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            export WHISPER_DONT_GENERATE_BINDINGS=1
+          fi
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            export CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+            export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
+          fi
+
+          if [[ "${{ matrix.settings.output }}" == "linux-arm64" || "${{ matrix.settings.output }}" == "darwin-arm64" || "${{ matrix.settings.output }}" == "windows-arm64" ]]; then
+            export GGML_CPU_ARM_ARCH=armv8-a
+          fi
+
+          # whisper.cpp ggml: "MSVC is not supported for ARM, use clang"
+          if [[ "${{ matrix.settings.output }}" == "windows-arm64" ]]; then
+            export CC=clang-cl
+            export CXX=clang-cl
+            export CMAKE_GENERATOR=Ninja
+            export CMAKE_C_COMPILER=clang-cl
+            export CMAKE_CXX_COMPILER=clang-cl
+          fi
+
+          cargo build --release --locked --target ${{ matrix.settings.target }}
 
       - name: Sign macOS speech sidecar
         if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
