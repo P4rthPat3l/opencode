@@ -95,6 +95,11 @@ tasks.register("packageRuntimeRelease") {
       val bin = root.resolve("packages/opencode/dist/${target[1]}/bin")
       val executable = bin.resolve(target[2])
       require(executable.isFile) { "Missing $executable. Build ${target[1]} before packaging." }
+      val speechName = if (target[2].endsWith(".exe")) "opencode-speech.exe" else "opencode-speech"
+      val speech = bin.resolve(speechName)
+      require(speech.isFile) {
+        "Missing $speech. Build packages/speech for this platform and re-run the opencode build with OPENCODE_SPEECH_DIR (or --single after cargo build --release)."
+      }
       val filename = "p4rth-opencode-${target[0]}.zip"
       val archive = destination.resolve(filename)
       ZipOutputStream(archive.outputStream().buffered()).use { zip ->
@@ -105,7 +110,7 @@ tasks.register("packageRuntimeRelease") {
         }
       }
       val sha256 = MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
-      logger.lifecycle("Packaged ${target[0]}: $sha256")
+      logger.lifecycle("Packaged ${target[0]} (with $speechName): $sha256")
     }
 
     val artifacts = linkedMapOf<String, Map<String, Any>>()

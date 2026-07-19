@@ -1,16 +1,74 @@
 # P4rth OpenCode Release Checklist
 
-This is the low-maintenance release path: build locally, create one GitHub Release, then upload the plugin to JetBrains Marketplace manually.
+Preferred path: **GitHub Actions multi-platform workflow** (builds `p4rth-opencode` + `opencode-speech` for every JetBrains target). Manual/local packaging is still supported for a single host.
+
+## 0. Multi-platform release via GitHub Actions (recommended)
+
+Workflow: [`.github/workflows/jetbrains-runtime-release.yml`](../.github/workflows/jetbrains-runtime-release.yml)
+
+### What it does
+
+1. Builds `opencode-speech` natively on 6 runners:
+   - `linux-x64` → `ubuntu-24.04`
+   - `linux-arm64` → `ubuntu-24.04-arm`
+   - `darwin-arm64` → `macos-15`
+   - `darwin-x64` → `macos-15-intel`
+   - `windows-x64` → `windows-2025`
+   - `windows-arm64` → `windows-11-arm`
+2. Cross-compiles the OpenCode CLI for those 6 platforms with speech copied into each `bin/`
+3. Runs `packageRuntimeRelease` → `p4rth-opencode-*.zip` + `p4rth-opencode-jetbrains-runtime.json`
+4. Creates/updates GitHub Release `v<version>` with all assets
+
+### How to run
+
+1. Push the `jetbrains` branch (or merge the workflow to your default branch).
+2. Open **Actions → JetBrains runtime release → Run workflow**.
+3. Set **version** to match `pluginVersion` in `sdks/jetbrains/gradle.properties` (e.g. `2.0.1`).
+4. Leave **create_release** checked.
+5. Wait for green jobs, then verify:
+
+```text
+https://github.com/P4rthPat3l/opencode/releases/latest/download/p4rth-opencode-jetbrains-runtime.json
+```
+
+Each platform ZIP **must** list both `p4rth-opencode` and `opencode-speech` (or `.exe` variants). Packaging fails without speech.
+
+### After publish — force clients to re-download
+
+The plugin re-reads the manifest on prepare. Incomplete installs (binary without speech) are re-downloaded. To force a clean install on your machine:
+
+```bash
+rm -rf ~/.cache/JetBrains/*/p4rth-opencode
+# Windows: %LOCALAPPDATA%\JetBrains\<IDE>\p4rth-opencode
+# macOS: ~/Library/Caches/JetBrains/*/p4rth-opencode
+```
+
+Then reopen the OpenCode tool window.
+
+### Optional signing secrets
+
+| Secret | Purpose |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 Developer ID `.p12` (macOS speech codesign) |
+| `APPLE_CERTIFICATE_PASSWORD` | password for that `.p12` |
+
+Without them, macOS/Windows binaries still ship; users may see first-run OS Gatekeeper/SmartScreen prompts. Linux needs no paid signing.
+
+### Runner notes
+
+- Public repos get free minutes on standard GitHub-hosted runners (including `ubuntu-24.04-arm`, `macos-15-intel`, `windows-11-arm`).
+- No Blacksmith or self-hosted runners required.
+- If a label is unavailable on your plan, edit the matrix host in the workflow (e.g. `macos-13` for Intel, drop `windows-11-arm` temporarily).
 
 ## 1. One-time accounts and tools
 
-- Make `P4rthPat3l/opencode` public so standard GitHub Actions remain free if automation is added later.
-- Install Bun, JDK 21, Rust, `gh`, and the native build tools required by `packages/speech`.
+- Make `P4rthPat3l/opencode` public so standard GitHub Actions remain free.
+- Install Bun, JDK 21, Rust, `gh`, and the native build tools required by `packages/speech` (only needed for local packaging).
 - Run `gh auth login` and select the `P4rthPat3l/opencode` repository.
 - Create a JetBrains Marketplace vendor profile, accept the Developer Agreement, and create a permanent Marketplace token.
 - Follow the [JetBrains plugin signing guide](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) to create a private key and certificate chain.
 
-Use one version for the runtime and plugin, for example `0.1.0`. Update `pluginVersion` in `sdks/jetbrains/gradle.properties` before building.
+Use one version for the runtime and plugin, for example `2.0.1`. Update `pluginVersion` in `sdks/jetbrains/gradle.properties` before building.
 
 Before committing the first release, remove generated IntelliJ caches from Git tracking if they were staged previously:
 
@@ -20,23 +78,32 @@ git rm -r --cached sdks/jetbrains/.intellijPlatform
 
 The directory is ignored and Gradle will recreate it locally.
 
-## 2. Quick GitHub release for the current machine
+## 2. Quick local package for the current machine
 
-This example builds Linux x64. Change the platform key when building on another supported machine.
+Helper (speech + CLI + ZIP + partial manifest):
+
+```bash
+chmod +x sdks/jetbrains/script/package-local-runtime.sh
+./sdks/jetbrains/script/package-local-runtime.sh 2.0.1
+```
+
+Manual equivalent (example: Linux x64):
 
 ```bash
 cd packages/speech
-cargo build --release
+cargo build --release --locked
 
 cd ../opencode
-OPENCODE_VERSION=0.1.0 bun run build --single --skip-install
-bun run package:release
+OPENCODE_VERSION=2.0.1 bun run build --single --skip-install
+# --single copies packages/speech/target/release/opencode-speech into dist when present
 
 cd ../../sdks/jetbrains
 ./gradlew packageRuntimeRelease \
-  -PreleaseVersion=0.1.0 \
+  -PreleaseVersion=2.0.1 \
   -PreleasePlatform=linux-x64
 ```
+
+A single-platform ZIP is enough for **your** IDE. Marketplace / multi-OS users need the full Actions workflow.
 
 The release files are written to:
 
@@ -204,7 +271,7 @@ p4rth-opencode-windows-arm64.zip
 p4rth-opencode-jetbrains-runtime.json
 ```
 
-If a platform archive does not contain `opencode-speech` or `opencode-speech.exe`, the runtime still works, but local voice dictation is unavailable on that platform.
+`packageRuntimeRelease` **requires** `opencode-speech` / `opencode-speech.exe` next to the main binary. Incomplete ZIPs are rejected at package time so voice does not silently break.
 
 ## 6. Later Marketplace updates
 

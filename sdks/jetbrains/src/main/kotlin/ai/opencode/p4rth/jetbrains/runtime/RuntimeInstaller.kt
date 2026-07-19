@@ -27,20 +27,34 @@ class RuntimeInstaller(private val paths: RuntimePaths) {
   /** Branded fork binaries already installed on the host. Validated by the sidecar handshake before use. */
   fun detectedRuntimes(): List<Path> = RuntimeDetector.detect()
 
-  /** Reuse a previously downloaded managed runtime, otherwise download it. */
+  /**
+   * Resolve the managed runtime for this host.
+   *
+   * Always consults the manifest so a newer release (or a re-published version that adds
+   * missing files like `opencode-speech`) can replace a stale install. A previously active
+   * path is only reused when it still matches the manifest version and is complete.
+   */
   fun resolveManagedRuntime(settingsManifestUrl: String, indicator: ProgressIndicator): Path {
     val platform = PlatformDetector.current() ?: error("Unsupported operating system or CPU architecture")
-    val active = paths.activeFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }?.let { Path.of(it) }
-    if (active != null && active.exists()) return active
-
     indicator.text = "Downloading OpenCode runtime manifest…"
     val manifest = RuntimeManifestParser.parse(downloadText(settingsManifestUrl, indicator))
     val artifact = RuntimeManifestParser.artifactFor(manifest, platform)
     val installRoot = paths.runtimes.resolve(manifest.runtimeVersion).resolve(platform.key)
     val executable = installRoot.resolve(platform.executableName)
-    if (executable.exists()) {
+    val speechName = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "opencode-speech.exe" else "opencode-speech"
+    val speech = installRoot.resolve(speechName)
+
+    // Complete install for this manifest version: main binary + speech sidecar for voice.
+    if (executable.exists() && speech.exists()) {
+      makeExecutable(executable)
+      makeExecutable(speech)
       paths.activeFile.writeText(executable.toString())
       return executable
+    }
+
+    // Incomplete or missing install — (re)download. Wipe a partial tree first.
+    if (installRoot.exists()) {
+      installRoot.toFile().deleteRecursively()
     }
 
     indicator.text = "Downloading OpenCode runtime…"
@@ -55,10 +69,10 @@ class RuntimeInstaller(private val paths: RuntimePaths) {
     archive.deleteIfExists()
     installRoot.parent.createDirectories()
     Files.move(tempRoot, installRoot, StandardCopyOption.ATOMIC_MOVE)
+    require(executable.exists()) { "Runtime archive is missing ${platform.executableName}" }
+    require(speech.exists()) { "Runtime archive is missing $speechName (required for local voice)" }
     makeExecutable(executable)
-    installRoot.resolve(if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "opencode-speech.exe" else "opencode-speech")
-      .takeIf { it.exists() }
-      ?.let(::makeExecutable)
+    makeExecutable(speech)
     paths.activeFile.writeText(executable.toString())
     return executable
   }

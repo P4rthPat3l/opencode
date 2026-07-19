@@ -10,9 +10,9 @@ object ProductIdentity {
   const val bridgeObject = "__P4RTH_OPENCODE_IDE__"
   const val webObject = "__P4RTH_OPENCODE_IDE_HOST__"
   const val runtimeChannel = "jetbrains-stable"
-  const val preferredRuntimeVersion = "1.18.3"
-  const val minimumRuntimeVersion = "1.18.3"
-  const val maximumRuntimeVersion = "1.18.3"
+  const val preferredRuntimeVersion = "2.0.1"
+  const val minimumRuntimeVersion = "2.0.0"
+  const val maximumRuntimeVersion = "2.0.1"
 
   val requiredCapabilities = setOf(
     "jetbrains-context",

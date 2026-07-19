@@ -23,6 +23,18 @@ const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
 const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
+// Comma-separated platform keys, e.g. --only=linux-x64,darwin-arm64,windows-x64
+// Matches the dist folder suffix after "opencode-" (not including baseline/musl unless listed).
+const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length)
+const onlyPlatforms = onlyArg
+  ? new Set(
+      onlyArg
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => part.replace(/^opencode-/, "")),
+    )
+  : null
 
 const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
@@ -113,7 +125,7 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
+const targets = (singleFlag
   ? allTargets.filter((item) => {
       if (item.os !== process.platform || item.arch !== process.arch) {
         return false
@@ -133,6 +145,22 @@ const targets = singleFlag
       return true
     })
   : allTargets
+).filter((item) => {
+  if (!onlyPlatforms) return true
+  const key = [
+    item.os === "win32" ? "windows" : item.os,
+    item.arch,
+    item.avx2 === false ? "baseline" : undefined,
+    item.abi,
+  ]
+    .filter(Boolean)
+    .join("-")
+  return onlyPlatforms.has(key)
+})
+
+if (onlyPlatforms && targets.length === 0) {
+  throw new Error(`No build targets matched --only=${onlyArg}`)
+}
 
 await $`rm -rf dist`
 
