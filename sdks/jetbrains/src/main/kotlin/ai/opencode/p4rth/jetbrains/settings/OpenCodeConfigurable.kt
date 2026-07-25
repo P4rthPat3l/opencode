@@ -39,6 +39,13 @@ class OpenCodeConfigurable : Configurable {
   }
   private val diagnosticLogging = JBCheckBox("Help troubleshoot problems (writes extra logs)")
 
+  private val restartServerButton = JButton("Restart OpenCode Server").apply {
+    toolTipText = "Stop and restart the background OpenCode process running inside this IDE"
+  }
+  private val restartServerStatus = mutedLabel(" ").apply {
+    border = JBUI.Borders.emptyTop(2)
+  }
+
   private val commitMessageModel = ComboBox(DefaultComboBoxModel(arrayOf(ModelChoice.DEFAULT))).apply {
     renderer = object : DefaultListCellRenderer() {
       override fun getListCellRendererComponent(
@@ -106,6 +113,7 @@ class OpenCodeConfigurable : Configurable {
 
     setModelChoices(listOf(ModelChoice.DEFAULT), settings.state.commitMessageModel)
     refreshModelsButton.addActionListener { loadModelsAsync(userInitiated = true) }
+    restartServerButton.addActionListener { restartServer() }
 
     val modelRow = JPanel(BorderLayout(8, 0)).apply {
       add(commitMessageModel, BorderLayout.CENTER)
@@ -127,6 +135,17 @@ class OpenCodeConfigurable : Configurable {
       .addVerticalGap(8)
       .addLabeledComponent("If the commit box already has text", commitMessageReplaceMode)
       .addComponent(replaceHelp)
+      .addVerticalGap(16)
+      .addComponent(sectionTitle("OpenCode server"))
+      .addComponent(restartServerButton)
+      .addComponent(
+        mutedLabel(
+          "Restarts the background OpenCode process running inside this IDE. Use this if you " +
+            "switched accounts for a provider (or changed other settings) and the change is not " +
+            "showing up in chat — any OpenCode panel currently open will reconnect automatically.",
+        ),
+      )
+      .addComponent(restartServerStatus)
       .addVerticalGap(16)
       .addComponent(sectionTitle("Advanced"))
       .addComponent(
@@ -192,6 +211,23 @@ class OpenCodeConfigurable : Configurable {
 
   override fun disposeUIResources() {
     panel = null
+  }
+
+  private fun restartServer() {
+    restartServerButton.isEnabled = false
+    restartServerStatus.text = "Restarting…"
+    ApplicationManager.getApplication().executeOnPooledThread {
+      val result = runCatching {
+        ApplicationManager.getApplication().getService(OpenCodeApplicationService::class.java).restart()
+      }
+      SwingUtilities.invokeLater {
+        restartServerButton.isEnabled = true
+        restartServerStatus.text = result.fold(
+          onSuccess = { "OpenCode server restarted." },
+          onFailure = { error -> "Couldn’t restart (${error.message?.take(120) ?: "unknown error"})." },
+        )
+      }
+    }
   }
 
   private fun loadModelsAsync(userInitiated: Boolean) {

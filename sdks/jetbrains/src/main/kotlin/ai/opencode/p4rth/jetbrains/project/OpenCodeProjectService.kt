@@ -20,6 +20,11 @@ class OpenCodeProjectService(private val project: Project) : Disposable {
     if (visible) panel.onShown() else panel.onHidden()
   }
 
+  /** Tell the attached panel (if any) to reconnect after an application-level sidecar restart. */
+  fun reloadPanel() {
+    panel?.reload()
+  }
+
   /** Start (or restart on a new sidecar) the targeted file-refresh subscription for this project. */
   @Synchronized
   fun onSidecarReady(sidecar: Sidecar) {

@@ -1,13 +1,16 @@
 package ai.opencode.p4rth.jetbrains.runtime
 
+import ai.opencode.p4rth.jetbrains.project.OpenCodeProjectService
 import ai.opencode.p4rth.jetbrains.settings.OpenCodeSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -198,6 +201,28 @@ class OpenCodeApplicationService : Disposable {
   fun stopIfOwned() {
     val current = synchronized(this) { sidecar.also { sidecar = null } } ?: return
     runCatching { process.stop(current) }.onFailure { log.warn("Failed to stop OpenCode sidecar", it) }
+  }
+
+  /**
+   * Force-restart the managed sidecar. Must not be called on the EDT: stopping the process
+   * blocks for up to 6 seconds (see [SidecarProcess.stop]).
+   *
+   * This is the only way to pick up server-side state that a long-lived sidecar does not
+   * observe on its own — e.g. switching a provider account elsewhere (web UI or TUI) is not
+   * seen by an already-running JetBrains sidecar until it is restarted. Every open Tool Window
+   * panel is told to reconnect afterwards, which lazily starts a fresh sidecar on next use.
+   */
+  fun restart() {
+    synchronized(this) { cancelIdleStop() }
+    val current = synchronized(this) { sidecar.also { sidecar = null } }
+    if (current != null) {
+      runCatching { process.stop(current) }.onFailure { log.warn("Failed to stop OpenCode sidecar for restart", it) }
+    }
+    ApplicationManager.getApplication().invokeLater {
+      for (project in ProjectManager.getInstance().openProjects) {
+        project.service<OpenCodeProjectService>().reloadPanel()
+      }
+    }
   }
 
   /** Live managed sidecar if this process already started one (e.g. chat panel open). */

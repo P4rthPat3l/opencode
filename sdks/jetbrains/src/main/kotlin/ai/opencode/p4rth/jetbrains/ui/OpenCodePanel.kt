@@ -102,6 +102,18 @@ class OpenCodePanel(private val project: Project) : Disposable {
     if (browser == null) prepare()
   }
 
+  /**
+   * Reconnect after the application-level sidecar was restarted (e.g. via the settings
+   * "Restart OpenCode Server" action). No-op if this panel has no live browser: it is already
+   * idle/hidden and will start fresh against the new sidecar the next time it is shown.
+   */
+  fun reload() {
+    if (browser == null) return
+    disposeBrowser()
+    showStatus("Restarting OpenCode…")
+    prepare()
+  }
+
   /** Tool Window hidden: dispose the browser after the idle period to free JCEF memory. */
   fun onHidden() {
     disposeAlarm.cancelAllRequests()
