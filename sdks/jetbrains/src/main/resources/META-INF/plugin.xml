@@ -1,6 +1,7 @@
 <idea-plugin>
   <depends>com.intellij.modules.platform</depends>
   <depends>com.intellij.modules.vcs</depends>
+  <depends>com.intellij.modules.jcef</depends>
 
   <extensions defaultExtensionNs="com.intellij">
     <applicationService serviceImplementation="ai.opencode.p4rth.jetbrains.runtime.OpenCodeApplicationService"/>
