@@ -91,13 +91,15 @@ const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID:
 }
 
 export function buildRequestParts(input: BuildRequestPartsInput) {
-  const requestParts: PromptRequestPart[] = [
-    {
-      id: Identifier.ascending("part"),
-      type: "text",
-      text: input.text,
-    },
-  ]
+  const requestParts: PromptRequestPart[] = input.text.trim()
+    ? [
+        {
+          id: Identifier.ascending("part"),
+          type: "text",
+          text: input.text,
+        },
+      ]
+    : []
   const ideContext = formatIdeEditorContext(input.ideContext)
   if (ideContext) {
     requestParts.push({

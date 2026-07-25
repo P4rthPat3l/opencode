@@ -655,7 +655,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       type: "resource",
       name: resource.name,
       uri: resource.uri,
-      client: resource.client,
+      client: resource.server,
       display: resource.name,
       description: resource.description,
       mime: resource.mimeType,
@@ -1652,10 +1652,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
       <DockShellForm
+        data-dock-border-underlay="legacy"
         onSubmit={handleSubmit}
         classList={{
           "group/prompt-input": true,
-          "focus-within:shadow-xs-border": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
           [props.class ?? ""]: !!props.class,
         }}

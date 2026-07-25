@@ -8,7 +8,7 @@ import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { createMemo, createResource, type Component, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
-import { useServerSDK } from "@/context/server-sdk"
+import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "./dialog-connect-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
@@ -41,6 +41,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   const dialog = useDialog()
   const language = useLanguage()
   const serverSDK = useServerSDK()
+  const protocol = useServerProtocol()
   const serverSync = useServerSync()
   const providers = useProviders()
   const [accountsResult, { refetch: refreshAccounts }] = createResource(async () => {
@@ -100,6 +101,8 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
 
   const canManage = (item: ProviderItem) => source(item) !== "env" || accounts(item.id).length > 0
 
+  const canDisconnectCustom = (item: ProviderItem) => isConfigCustom(item.id) && protocol() === "v1"
+
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
 
   const isConfigCustom = (providerID: string) => {
@@ -126,6 +129,35 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
         showToast({ title: language.t("settings.providers.account.select.error"), description: requestError(error) })
       })
     setMutating(account.id, undefined)
+  }
+
+  const disableProvider = async (providerID: string, name: string) => {
+    if (protocol() !== "v1") return
+    const before = serverSync().data.config.disabled_providers ?? []
+    const next = before.includes(providerID) ? before : [...before, providerID]
+    serverSync().set("config", "disabled_providers", next)
+
+    await serverSync()
+      .updateConfig({ disabled_providers: next })
+      .then(() => {
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("provider.disconnect.toast.disconnected.title", { provider: name }),
+          description: language.t("provider.disconnect.toast.disconnected.description", { provider: name }),
+        })
+      })
+      .catch((err: unknown) => {
+        serverSync().set("config", "disabled_providers", before)
+        showToast({ title: language.t("common.requestFailed"), description: requestError(err) })
+      })
+  }
+
+  const disconnectCustomProvider = async (providerID: string, name: string) => {
+    await serverSDK()
+      .client.auth.remove({ providerID })
+      .catch(() => undefined)
+    await disableProvider(providerID, name)
   }
 
   const removeAccount = async (account: AuthAccount) => {
@@ -187,21 +219,36 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
                           <Tag>{type(item)}</Tag>
                         </div>
                         <Show
-                          when={canManage(item)}
+                          when={isConfigCustom(item.id)}
                           fallback={
-                            <span class="text-14-regular text-text-base opacity-0 group-hover:opacity-100 transition-opacity duration-200 pr-3 cursor-default">
-                              {language.t("settings.providers.connected.environmentDescription")}
-                            </span>
+                            <Show
+                              when={canManage(item)}
+                              fallback={
+                                <span class="text-14-regular text-text-base opacity-0 group-hover:opacity-100 transition-opacity duration-200 pr-3 cursor-default">
+                                  {language.t("settings.providers.connected.environmentDescription")}
+                                </span>
+                              }
+                            >
+                              <Button
+                                size="large"
+                                variant="ghost"
+                                icon="plus-small"
+                                onClick={() => connect(item.id)}
+                              >
+                                {language.t("settings.providers.account.add")}
+                              </Button>
+                            </Show>
                           }
                         >
-                          <Button
-                            size="large"
-                            variant="ghost"
-                            icon="plus-small"
-                            onClick={() => connect(item.id)}
-                          >
-                            {language.t("settings.providers.account.add")}
-                          </Button>
+                          <Show when={canDisconnectCustom(item)}>
+                            <Button
+                              size="large"
+                              variant="ghost"
+                              onClick={() => void disconnectCustomProvider(item.id, item.name)}
+                            >
+                              {language.t("common.disconnect")}
+                            </Button>
+                          </Show>
                         </Show>
                       </div>
                       <Show when={providerAccounts().length > 0}>
@@ -287,31 +334,33 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
               )}
             </For>
 
-            <div
-              class="flex items-center justify-between gap-4 min-h-16 border-b border-border-weak-base last:border-none flex-wrap py-3"
-              data-component="custom-provider-section"
-            >
-              <div class="flex flex-col min-w-0">
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <ProviderIcon id="synthetic" class="size-5 shrink-0 icon-strong-base" />
-                  <span class="text-14-medium text-text-strong">{language.t("provider.custom.title")}</span>
-                  <Tag>{language.t("settings.providers.tag.custom")}</Tag>
-                </div>
-                <span class="text-12-regular text-text-weak pl-8">
-                  {language.t("settings.providers.custom.description")}
-                </span>
-              </div>
-              <Button
-                size="large"
-                variant="secondary"
-                icon="plus-small"
-                onClick={() => {
-                  dialog.show(() => <DialogCustomProvider onBack={dialog.close} />)
-                }}
+            <Show when={protocol() === "v1"}>
+              <div
+                class="flex items-center justify-between gap-4 min-h-16 border-b border-border-weak-base last:border-none flex-wrap py-3"
+                data-component="custom-provider-section"
               >
-                {language.t("common.connect")}
-              </Button>
-            </div>
+                <div class="flex flex-col min-w-0">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <ProviderIcon id="synthetic" class="size-5 shrink-0 icon-strong-base" />
+                    <span class="text-14-medium text-text-strong">{language.t("provider.custom.title")}</span>
+                    <Tag>{language.t("settings.providers.tag.custom")}</Tag>
+                  </div>
+                  <span class="text-12-regular text-text-weak pl-8">
+                    {language.t("settings.providers.custom.description")}
+                  </span>
+                </div>
+                <Button
+                  size="large"
+                  variant="secondary"
+                  icon="plus-small"
+                  onClick={() => {
+                    dialog.show(() => <DialogCustomProvider onBack={dialog.close} />)
+                  }}
+                >
+                  {language.t("common.connect")}
+                </Button>
+              </div>
+            </Show>
           </SettingsList>
 
           <Button
